@@ -62,6 +62,17 @@ func formatVerbText(v tools.Verb, n int) string {
 		b.WriteString(v.Description)
 		b.WriteString("\n")
 	}
+	if v.MinimumProfile != "" {
+		b.WriteString("   Minimum profile: ")
+		b.WriteString(v.MinimumProfile)
+		b.WriteString("\n")
+	}
+	if len(v.Annotations) > 0 {
+		tool := mcp.NewTool(v.Name, v.Annotations...)
+		b.WriteString(fmt.Sprintf("   Safety: read-only=%t, destructive=%t, idempotent=%t, open-world=%t\n",
+			annotationValue(tool.Annotations.ReadOnlyHint), annotationValue(tool.Annotations.DestructiveHint),
+			annotationValue(tool.Annotations.IdempotentHint), annotationValue(tool.Annotations.OpenWorldHint)))
+	}
 	params := verbParameters(v)
 	if len(params) > 0 {
 		b.WriteString("   Parameters:\n")
@@ -113,6 +124,12 @@ func formatVerbText(v tools.Verb, n int) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// annotationValue dereferences an explicitly configured MCP hint. Missing
+// values render false defensively, though repository policy requires all hints.
+func annotationValue(value *bool) bool {
+	return value != nil && *value
 }
 
 // formatArgValue formats a single example argument value for plain-text output.

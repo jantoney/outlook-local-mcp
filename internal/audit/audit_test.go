@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -361,6 +362,27 @@ func TestAuditWrap_Success(t *testing.T) {
 	}
 	if entry.OperationType != "read" {
 		t.Errorf("OperationType = %q, want %q", entry.OperationType, "read")
+	}
+}
+
+// TestAuditWrapCapturesAccountProfileAndResource verifies the audit contract
+// for per-account mail operations, including auto-selected account context.
+func TestAuditWrapCapturesAccountProfileAndResource(t *testing.T) {
+	var buf bytes.Buffer
+	setAuditState(t, true, &buf)
+	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return mcp.NewToolResultText("ok"), nil
+	}
+	request := mcp.CallToolRequest{}
+	request.Params.Arguments = map[string]any{"message_id": "draft-1"}
+	ctx := auth.WithAccountInfo(context.Background(), auth.AccountInfo{Label: "personal", MailProfile: auth.MailProfileSend})
+	_, _ = AuditWrap("mail.send_draft", "send", handler)(ctx, request)
+	var entry AuditEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Account != "personal" || entry.MailProfile != "mail_send" || entry.ResourceID != "draft-1" {
+		t.Fatalf("audit identity = account %q profile %q resource %q", entry.Account, entry.MailProfile, entry.ResourceID)
 	}
 }
 

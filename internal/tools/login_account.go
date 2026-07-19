@@ -111,6 +111,8 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		if entry.Authenticated {
 			return mcp.NewToolResultError(fmt.Sprintf("Account %q is already connected.", label)), nil
 		}
+		profile := loginMailProfile(entry, cfg)
+		scopes := s.selectedScopes(profile)
 
 		clientID := entry.ClientID
 		if clientID == "" {
@@ -145,7 +147,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		if cred != nil {
 			silentCtx, silentCancel := context.WithTimeout(ctx, silentLoginTimeout)
 			_, silentErr := cred.GetToken(silentCtx, policy.TokenRequestOptions{
-				Scopes:    s.scopes,
+				Scopes:    scopes,
 				EnableCAE: true,
 			})
 			silentCancel()
@@ -156,7 +158,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			logger.Debug("silent token acquisition failed, falling back to interactive auth",
 				"label", label)
 
-			authErr := s.authenticateInline(ctx, cred, authenticator, authRecordPath, authMethod, cacheName, clientID, tenantID, label, logger)
+			authErr := s.authenticateInline(ctx, cred, authenticator, authRecordPath, authMethod, cacheName, clientID, tenantID, label, logger, profile)
 			if authErr != nil {
 				var dcErr *DeviceCodeFallbackError
 				if errors.As(authErr, &dcErr) {
@@ -169,7 +171,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			logger.Debug("silent token acquisition succeeded, skipping interactive auth", "label", label)
 		}
 
-		client, err := graphClientFactory(cred)
+		client, err := s.graphClient(cred, profile)
 		if err != nil {
 			logger.Error("graph client creation failed", "label", label, "error", err.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
@@ -185,6 +187,8 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			e.AuthRecordPath = authRecordPath
 			e.CacheName = cacheName
 			e.Authenticated = true
+			e.MailProfile = profile
+			e.Scopes = append([]string(nil), scopes...)
 			e.Email = ""
 		}); err != nil {
 			logger.Error("registry update failed", "label", label, "error", err.Error())
@@ -221,4 +225,25 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		logger.Info("account re-authenticated", "label", label, "upn", upn)
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+// loginMailProfile returns the profile stored on the runtime entry. For a
+// zero-valued legacy entry it consults accounts.json by label and otherwise
+// derives the backward-compatible default from global flags.
+func loginMailProfile(entry *auth.AccountEntry, cfg config.Config) auth.MailProfile {
+	if entry.MailProfile != auth.MailProfileCalendarOnly {
+		return entry.MailProfile
+	}
+	accounts, err := auth.LoadAccounts(cfg.AccountsPath)
+	if err == nil {
+		for _, account := range accounts {
+			if account.Label != entry.Label || account.MailProfile == "" {
+				continue
+			}
+			if profile, parseErr := auth.ParseMailProfile(account.MailProfile); parseErr == nil {
+				return profile
+			}
+		}
+	}
+	return auth.MailProfileFromConfig(cfg)
 }

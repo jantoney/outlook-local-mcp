@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "display_name": "Local Outlook MCP",
   "description": "Manage Microsoft Outlook calendars, events, and email directly from Claude. Runs entirely on your local machine — data stays on your device.",
-  "long_description": "A local MCP server that connects Claude to your Microsoft Outlook account via the Microsoft Graph API.\n\n## Features\n\n- **Calendar management**: list, create, update, delete, cancel, reschedule, and respond to events\n- **Free/busy lookup**: check availability across time ranges\n- **Email access**: list folders, search messages, read full message details\n- **Multi-account**: add and switch between multiple Microsoft accounts\n- **Recurrence support**: create and expand recurring events (daily, weekly, monthly, yearly)\n- **Teams integration**: create events with automatic Teams online meeting links\n\n## Privacy & Security\n\n- Runs as a single binary on your machine — no cloud relay, no proxy\n- OAuth tokens stored in your OS keychain (macOS Keychain / Windows Credential Manager)\n- Only connects to Microsoft Graph API with your explicit consent\n- Delegated permissions only: Calendars.ReadWrite, Mail.Read, User.Read",
+  "long_description": "A local MCP server that connects Claude to your Microsoft Outlook account via the Microsoft Graph API.\n\n## Features\n\n- **Calendar management**: list, create, update, delete, cancel, reschedule, and respond to events\n- **Free/busy lookup**: check availability across time ranges\n- **Email access**: list folders, search messages, manage drafts and allowlisted local attachments\n- **Per-account risk profiles**: calendar-only, mail read, draft management, or human-confirmed draft send\n- **Multi-account**: add and switch between multiple Microsoft accounts\n- **Recurrence support**: create and expand recurring events (daily, weekly, monthly, yearly)\n- **Teams integration**: create events with automatic Teams online meeting links\n\n## Privacy & Security\n\n- Runs as a single binary on your machine — no cloud relay, no proxy\n- OAuth tokens stored in your OS keychain (macOS Keychain / Windows Credential Manager)\n- Only connects to Microsoft Graph API with your explicit consent\n- Delegated permissions are selected per account: User.Read, Calendars.ReadWrite, and only the configured Mail.Read, Mail.ReadWrite, or Mail.Send scopes",
   "author": {
     "name": "Daniel Grenemark",
     "url": "https://github.com/desek"
@@ -42,7 +42,11 @@
         "OUTLOOK_MCP_CLIENT_ID": "${user_config.client_id}",
         "OUTLOOK_MCP_TENANT_ID": "${user_config.tenant_id}",
         "OUTLOOK_MCP_AUTH_METHOD": "${user_config.auth_method}",
-        "OUTLOOK_MCP_DEFAULT_TIMEZONE": "${user_config.timezone}"
+        "OUTLOOK_MCP_DEFAULT_TIMEZONE": "${user_config.timezone}",
+        "OUTLOOK_MCP_MAIL_ENABLED": "${user_config.mail_enabled}",
+        "OUTLOOK_MCP_MAIL_MANAGE_ENABLED": "${user_config.mail_manage_enabled}",
+        "OUTLOOK_MCP_MAIL_SEND_ENABLED": "${user_config.mail_send_enabled}",
+        "OUTLOOK_MCP_ATTACHMENT_ROOTS": "${user_config.attachment_roots}"
       },
       "platform_overrides": {
         "win32": {
@@ -58,11 +62,11 @@
     },
     {
       "name": "mail",
-      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. Required operation: help (detailed docs), list_folders (list mail folders with unread counts), list_messages (list messages with filtering), get_message (get full message details), search_messages (KQL full-text search), get_conversation (fetch full thread chronologically — MailEnabled), list_attachments (list attachment metadata — MailEnabled), get_attachment (download attachment content — MailEnabled), create_draft (create new draft — MailManageEnabled), create_reply_draft (reply draft preserving threading — MailManageEnabled), create_forward_draft (forward draft with new recipients — MailManageEnabled), update_draft (update draft fields — MailManageEnabled), delete_draft (permanently delete a draft — MailManageEnabled)."
+      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected account profile authorizes each operation. Includes read/search, managed drafts, add_attachment (allowlisted local file), and send_draft (human-confirmed existing draft send)."
     },
     {
       "name": "account",
-      "description": "Account management for Microsoft accounts. Required operation: help (detailed docs), add (add and authenticate a new account), remove (remove an account and clear tokens), list (list all accounts with state), login (re-authenticate a disconnected account), logout (disconnect without removing), refresh (force token refresh)."
+      "description": "Account management for Microsoft accounts. Required operation: help, add, remove, list, login, logout, refresh, and set_mail_profile (change one account's risk profile and require reauthentication)."
     },
     {
       "name": "system",
@@ -100,6 +104,34 @@
       "description": "Your timezone for calendar operations (IANA format). Use 'auto' to detect from your system, or specify explicitly, e.g. 'America/New_York', 'Europe/London', 'Asia/Tokyo'. Defaults to 'auto'.",
       "required": false,
       "default": "auto"
+    },
+    "mail_enabled": {
+      "type": "boolean",
+      "title": "Default Mail Read Access",
+      "description": "Default legacy and implicit accounts to mail_read. Per-account mail_profile overrides this.",
+      "required": false,
+      "default": false
+    },
+    "mail_manage_enabled": {
+      "type": "boolean",
+      "title": "Default Draft Management",
+      "description": "Default legacy and implicit accounts to mail_manage. Implies mail read but not send.",
+      "required": false,
+      "default": false
+    },
+    "mail_send_enabled": {
+      "type": "boolean",
+      "title": "Default Confirmed Draft Send",
+      "description": "Default legacy and implicit accounts to mail_send. Send still requires explicit human MCP elicitation for every draft.",
+      "required": false,
+      "default": false
+    },
+    "attachment_roots": {
+      "type": "string",
+      "title": "Allowed Attachment Directories",
+      "description": "OS path-list of directories from which mail.add_attachment may read local files. Empty disables local upload.",
+      "required": false,
+      "default": ""
     }
   }
 }

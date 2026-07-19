@@ -144,33 +144,41 @@ Common failure modes and remediation steps for `outlook-local-mcp`.
 
 ---
 
-## Mail disabled
+## Insufficient mail profile
 
-**Symptom:** The `mail` tool returns `mail access is not enabled` or `unknown operation`.
+**Symptom:** A mail verb reports that the selected account's profile is insufficient.
 
-**Cause:** The `OUTLOOK_MCP_MAIL_ENABLED` environment variable is not set (default is `false`). Mail tools are only registered when mail access is explicitly enabled.
+**Cause:** All mail verbs are discoverable, but the selected account does not have the minimum cumulative profile for that operation.
 
 **Remediation:**
 
-1. Set `OUTLOOK_MCP_MAIL_ENABLED=true` in the server's environment configuration and restart the server.
-2. Verify the setting with `{tool: "system", args: {operation: "status", output: "summary"}}` and check `config.features.mail_enabled`.
-3. On first enable, a new OAuth consent for `Mail.Read` is required. The authentication flow triggers automatically on the next tool call.
+1. Check profiles with `{tool: "account", args: {operation: "list"}}`.
+2. Change only the intended account with `{tool: "account", args: {operation: "set_mail_profile", label: "work", mail_profile: "mail_read"}}` (or `mail_manage` / `mail_send`).
+3. Reconnect it with `account.login` to consent to the new scope set.
 
 ---
 
-## Mail management disabled
+## Local attachment upload disabled
 
-**Symptom:** Draft operations (`create_draft`, `create_reply_draft`, `create_forward_draft`, `update_draft`, `delete_draft`) return `mail management is not enabled` or `unknown operation`.
+**Symptom:** `mail.add_attachment` reports that local attachment upload is disabled or the path is outside configured roots.
 
-**Cause:** `OUTLOOK_MCP_MAIL_MANAGE_ENABLED` is not set. Draft management is a separate opt-in that implies `MAIL_ENABLED`.
+**Cause:** `OUTLOOK_MCP_ATTACHMENT_ROOTS` is empty, the account is below `mail_manage`, or canonical path resolution places the file outside every allowed root.
 
 **Remediation:**
 
-1. Set `OUTLOOK_MCP_MAIL_MANAGE_ENABLED=true` (this automatically enables `MAIL_ENABLED` as well) and restart the server.
-2. Verify with `{tool: "system", args: {operation: "status", output: "summary"}}` and check `config.features.mail_manage_enabled`.
-3. On first enable, a new OAuth consent for `Mail.ReadWrite` is required (supersedes `Mail.Read`). The authentication flow triggers automatically on the next tool call.
+1. Configure `OUTLOOK_MCP_ATTACHMENT_ROOTS` as an OS path-list of the smallest directories that contain intended files, then restart.
+2. Confirm the selected account uses `mail_manage` or `mail_send`.
+3. Use a regular file under an allowed root; traversal and symlink/junction escapes are intentionally rejected.
 
-**Note:** The server never requests `Mail.Send`. Drafts are created in the Outlook Drafts folder; the user sends them manually from Outlook.
+---
+
+## Revoke Microsoft app consent
+
+**Symptom:** An account was lowered from `mail_send` or `mail_manage`, but Microsoft still records the old delegated consent.
+
+**Cause:** `account.set_mail_profile` clears local tokens and enforces the lower capability immediately, but it cannot revoke a grant stored by Microsoft.
+
+**Remediation:** Remove the application's consent from the personal Microsoft account privacy/app permissions page, or have an Entra administrator revoke the enterprise application's user/admin consent. Then reconnect the account and consent only to the new profile scopes.
 
 ---
 

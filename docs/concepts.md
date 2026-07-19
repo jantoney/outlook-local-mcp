@@ -54,17 +54,26 @@ Set `OUTLOOK_MCP_READ_ONLY=true` to disable all write operations. All write verb
 OUTLOOK_MCP_READ_ONLY=true ./outlook-local-mcp
 ```
 
-## Mail gating
+## Per-account mail profiles
 
-Mail access is disabled by default and enabled in two tiers via environment variables:
+The mail operation schema is stable at startup. Authorization is enforced for the selected account at call time using one cumulative profile:
 
-| Variable | Value | Effect |
+| Profile | Delegated mail scopes | Capability |
 |---|---|---|
-| `MAIL_ENABLED` | `false` (default) | Mail verbs unavailable; no mail OAuth scope requested |
-| `MAIL_ENABLED` | `true` | Enables read-only mail verbs (`mail.list_folders`, `mail.list_messages`, `mail.search_messages`, `mail.get_message`, `mail.get_attachment`); requests `Mail.Read` scope |
-| `MAIL_MANAGE_ENABLED` | `true` | Enables all mail verbs including draft management (implies `MAIL_ENABLED`); requests `Mail.ReadWrite` scope |
+| `calendar_only` | none | Calendar only |
+| `mail_read` | `Mail.Read` | Read messages and existing attachments |
+| `mail_manage` | `Mail.ReadWrite` | Read mail, manage drafts, and add local attachments; no send |
+| `mail_send` | `Mail.ReadWrite`, `Mail.Send` | Managed drafts plus human-confirmed draft send |
 
-`Mail.Send` is **never** requested under any configuration. The model prepares drafts that land in Outlook Drafts for manual review; email is never sent automatically. Enabling mail read for the first time triggers an incremental consent prompt; upgrading to mail manage triggers re-consent.
+Every profile also requests `User.Read` and `Calendars.ReadWrite`. `account.add` accepts `mail_profile`; `account.set_mail_profile` changes it, clears local tokens, disconnects the account, and requires `account.login`. Global `MAIL_ENABLED`, `MAIL_MANAGE_ENABLED`, and `MAIL_SEND_ENABLED` flags remain backward-compatible defaults for the implicit account and legacy records, in increasing precedence. Microsoft consent is not revoked by lowering a local profile.
+
+## Local draft attachments
+
+`mail.add_attachment` attaches exactly one local file to an existing draft and requires `mail_manage` or higher. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
+
+## Confirmed draft send
+
+`mail.send_draft` requires `mail_send` and accepts only an existing draft ID. The server fetches the subject, recipients, and attachment names and presents them through MCP elicitation. It sends only after the human explicitly accepts; unsupported elicitation, decline, and cancel all fail safely. Graph acceptance does not confirm final delivery, which remains subject to Exchange processing.
 
 ## Headless and non-interactive authentication
 
@@ -85,12 +94,14 @@ The server requests scopes incrementally. Expanding mail access after initial co
 | Feature | OAuth scope |
 |---|---|
 | Calendar (always active) | `Calendars.ReadWrite` |
-| `MAIL_ENABLED=false` (default) | *(none)* |
-| `MAIL_ENABLED=true` | `Mail.Read` |
-| `MAIL_MANAGE_ENABLED=true` (implies `MAIL_ENABLED`) | `Mail.ReadWrite` |
+| Account identity (always active) | `User.Read` |
+| `calendar_only` | *(none)* |
+| `mail_read` | `Mail.Read` |
+| `mail_manage` | `Mail.ReadWrite` |
+| `mail_send` | `Mail.ReadWrite`, `Mail.Send` |
 | Refresh tokens (always) | `offline_access` (added automatically by the identity library) |
 
-`Mail.Send` is never requested under any configuration.
+`Mail.Send` is requested only for accounts explicitly or by default configured with `mail_send`.
 
 ## Well-known client IDs
 

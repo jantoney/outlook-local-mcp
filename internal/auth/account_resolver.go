@@ -105,9 +105,11 @@ func (s *accountResolverState) middleware(next mcpserver.ToolHandlerFunc) mcpser
 			AuthMethod:     inferAuthMethod(entry),
 		})
 		ctx = WithAccountInfo(ctx, AccountInfo{
-			Label:    entry.Label,
-			Email:    entry.Email,
-			Advisory: s.disconnectedAdvisory(entry, request),
+			Label:       entry.Label,
+			Email:       entry.Email,
+			MailProfile: entry.MailProfile,
+			Scopes:      append([]string(nil), entry.Scopes...),
+			Advisory:    s.disconnectedAdvisory(entry, request),
 		})
 
 		return next(ctx, request)

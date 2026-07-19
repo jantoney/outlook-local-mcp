@@ -821,7 +821,7 @@ func TestAuthenticateDeviceCode_ElicitationError_DoesNotBlock(t *testing.T) {
 	}
 
 	start := time.Now()
-	err := state.authenticateDeviceCode(context.Background(), nil, nil, "", "device_code", "", "", "", "block-test", slog.Default())
+	err := state.authenticateDeviceCode(context.Background(), nil, nil, "", "device_code", "", "", "", "block-test", slog.Default(), auth.MailProfileCalendarOnly)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -1001,7 +1001,7 @@ func TestAuthenticateDeviceCode_ElicitationError_NoStderrDependency(t *testing.T
 		pending: make(map[string]*pendingAccount),
 	}
 
-	err := state.authenticateDeviceCode(context.Background(), nil, nil, "", "device_code", "", "", "", "stderr-test", slog.Default())
+	err := state.authenticateDeviceCode(context.Background(), nil, nil, "", "device_code", "", "", "", "stderr-test", slog.Default(), auth.MailProfileCalendarOnly)
 	if err == nil {
 		t.Fatal("expected DeviceCodeFallbackError")
 	}
@@ -1320,7 +1320,7 @@ func TestDeviceCode_PendingAuth_GoroutineNotCancelled(t *testing.T) {
 	}
 
 	err := state.authenticateDeviceCode(
-		context.Background(), nil, nil, "", "device_code", "", "", "", "nocancel-test", slog.Default(),
+		context.Background(), nil, nil, "", "device_code", "", "", "", "nocancel-test", slog.Default(), auth.MailProfileCalendarOnly,
 	)
 	if err == nil {
 		t.Fatal("expected DeviceCodeFallbackError")
@@ -1616,7 +1616,7 @@ func TestAuthCodeAuth_NoPendingState(t *testing.T) {
 
 	err := state.authenticateInline(
 		context.Background(), nil, mock, t.TempDir()+"/auth.json",
-		"auth_code", "", "", "", "authcode-pending", slog.Default(),
+		"auth_code", "", "", "", "authcode-pending", slog.Default(), auth.MailProfileCalendarOnly,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

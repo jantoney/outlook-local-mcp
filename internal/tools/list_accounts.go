@@ -79,6 +79,7 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 				"authenticated": entry.Authenticated,
 				"email":         entry.Email,
 				"auth_method":   entry.AuthMethod,
+				"mail_profile":  entry.MailProfile.String(),
 			})
 		}
 

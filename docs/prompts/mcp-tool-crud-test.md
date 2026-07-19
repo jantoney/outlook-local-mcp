@@ -520,9 +520,9 @@ To verify AC-5 manually:
 3. Restart the server.
 4. Call `{tool: "account", args: {operation: "list"}}` and verify "default" is present.
 
-### Step 30 -- Mail operations (skip if mail disabled)
+### Step 30 -- Mail operations (skip if selected account is below mail_read)
 
-If `config.features.mail_enabled` from Step 0c is `false`, **skip** Steps 30 through 36 and record them as SKIP.
+Use the selected account's `mail_profile` from Step 1. If it is `calendar_only`, **skip** Steps 30 through 36b and record them as SKIP.
 
 **30a.** Call `{tool: "mail", args: {operation: "help"}}` to discover available mail verbs.
 
@@ -541,9 +541,9 @@ Call `{tool: "mail", args: {operation: "list_messages", ...}}` four times with t
 - **Verify:** All calls return plain text. The filtered counts are less than or equal to the baseline.
 - **Fail:** If any call returns an error or ignores the filter.
 
-### Step 31 -- Create draft (skip if mail management disabled)
+### Step 31 -- Create draft (skip if selected account is below mail_manage)
 
-If `config.features.mail_manage_enabled` from Step 0c is `false`, **skip** Steps 31 through 35 and record them as SKIP.
+If the selected account is below `mail_manage`, **skip** draft write steps and record them as SKIP.
 
 Call `{tool: "mail", args: {operation: "create_draft", to: "<own UPN>", subject: "CRUD test draft", body: "Created by MCP CRUD lifecycle test.", importance: "normal"}}`.
 
@@ -598,6 +598,20 @@ Call `{tool: "mail", args: {operation: "get_message", id: "<message ID>", output
 - **Verify:** Response is plain text with attachment metadata (name, size, content type).
 - **Verify:** If the attachment is within the configured size limit, content is returned (base64); otherwise an explanatory message is returned.
 - **Fail:** If the attachment cannot be retrieved for a valid ID.
+
+### Step 36a -- Add a local attachment to a draft
+
+If no safe test file path under `OUTLOOK_MCP_ATTACHMENT_ROOTS` was supplied by the operator, skip this step. Otherwise create a dedicated draft, call `{tool: "mail", args: {operation: "add_attachment", message_id: "<draft ID>", file_path: "<allowlisted test file>"}}`, then verify `list_attachments` shows the returned name and ID. Delete the dedicated draft afterward.
+
+- **Verify:** The confirmation reports server-verified ID, name, size, content type, and upload mode.
+- **Fail:** If the file escapes the allowlist, the draft changes unexpectedly, or metadata cannot be verified.
+
+### Step 36b -- Human-confirmed draft send
+
+Run only in interactive mode with a selected account whose profile is `mail_send`. Create a dedicated self-addressed draft, call `{tool: "mail", args: {operation: "send_draft", message_id: "<draft ID>"}}`, and verify MCP elicitation displays its subject, recipient, and attachment names before accepting. Verify the confirmation says Microsoft Graph accepted the send and that delivery remains subject to Exchange processing. In non-interactive mode or without `mail_send`, record SKIP; a boolean confirmation argument must never be supplied.
+
+- **Verify:** Accepting an unchanged draft sends once; declining or changing the draft sends nothing.
+- **Fail:** If sending occurs without accepted elicitation or if the confirmation claims final delivery.
 
 ## Reporting
 
@@ -664,6 +678,8 @@ After all steps, print a summary table. Every row **MUST** include a short `Comm
 | 34   | Delete drafts                     | PASS/FAIL/SKIP | e.g., "both drafts deleted, 404 on re-fetch"             |
 | 35   | Get conversation                  | PASS/FAIL/SKIP | e.g., "thread returned in chronological order"           |
 | 36   | Get attachment                    | PASS/FAIL/SKIP | e.g., "metadata + base64 under size limit"               |
+| 36a  | Add local draft attachment        | PASS/FAIL/SKIP | e.g., "verified metadata; direct upload"                 |
+| 36b  | Human-confirmed draft send        | PASS/FAIL/SKIP | e.g., "accepted unchanged draft; Graph accepted send"    |
 ```
 
 Then print the **environment** section using all values recorded in Steps 0c and 1:

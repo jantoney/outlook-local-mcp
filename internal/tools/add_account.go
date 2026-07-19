@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/pkg/browser"
 )
 
@@ -62,6 +63,10 @@ func NewAddAccountTool() mcp.Tool {
 		),
 		mcp.WithString("auth_method",
 			mcp.Description("Authentication method: 'browser', 'device_code', or 'auth_code'. Defaults to the server's configured method."),
+		),
+		mcp.WithString("mail_profile",
+			mcp.Description("Account capability profile: calendar_only, mail_read, mail_manage, or mail_send. Defaults to the server flags."),
+			mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send"),
 		),
 	)
 }
@@ -108,6 +113,14 @@ type addAccountState struct {
 	// scopes holds the OAuth scopes to use for authentication and token
 	// exchange during add_account. Built from auth.Scopes(cfg).
 	scopes []string
+
+	// createGraphClient builds a Graph client using the selected profile's
+	// scope set. Tests that inject graphClientFactory may leave this nil.
+	createGraphClient func(azcore.TokenCredential, auth.MailProfile) (*msgraphsdk.GraphServiceClient, error)
+
+	// scopesForProfile derives delegated scopes for one account profile.
+	// Tests may leave it nil to retain the fixed scopes seam.
+	scopesForProfile func(auth.MailProfile) []string
 }
 
 // pendingAccount holds the in-progress authentication state for a device_code
@@ -136,6 +149,9 @@ type pendingAccount struct {
 	// authMethod is the authentication method (always "device_code" for pending accounts).
 	authMethod string
 
+	// mailProfile is the capability profile selected when authentication began.
+	mailProfile auth.MailProfile
+
 	// cancel cancels the authentication context, releasing resources after the
 	// goroutine completes or on cleanup.
 	cancel context.CancelFunc
@@ -161,7 +177,29 @@ func defaultAddAccountState(scopes []string) *addAccountState {
 		openBrowser:     browser.OpenURL,
 		pending:         make(map[string]*pendingAccount),
 		scopes:          scopes,
+		createGraphClient: func(credential azcore.TokenCredential, profile auth.MailProfile) (*msgraphsdk.GraphServiceClient, error) {
+			return auth.NewDefaultGraphClientFactory(auth.ScopesForProfile(profile))(credential)
+		},
+		scopesForProfile: auth.ScopesForProfile,
 	}
+}
+
+// selectedScopes returns the profile-specific scope set in production and the
+// fixed injected scope set in legacy tests.
+func (s *addAccountState) selectedScopes(profile auth.MailProfile) []string {
+	if s.scopesForProfile != nil {
+		return s.scopesForProfile(profile)
+	}
+	return s.scopes
+}
+
+// graphClient creates a scope-specific Graph client, falling back to the
+// package test seam when a state-specific factory was not provided.
+func (s *addAccountState) graphClient(credential azcore.TokenCredential, profile auth.MailProfile) (*msgraphsdk.GraphServiceClient, error) {
+	if s.createGraphClient != nil {
+		return s.createGraphClient(credential, profile)
+	}
+	return graphClientFactory(credential)
 }
 
 // defaultAddAccountURLElicit retrieves the MCPServer and ClientSession from
@@ -208,10 +246,6 @@ func defaultAddAccountElicit(ctx context.Context, request mcp.ElicitationRequest
 // registers the account in the registry.
 func HandleAddAccount(registry *auth.AccountRegistry, cfg config.Config) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	scopes := auth.Scopes(cfg)
-	// Initialize the package-level graph client factory with the configured
-	// scopes so that add_account creates Graph clients with the correct scope
-	// set (including Mail.Read when mail is enabled).
-	graphClientFactory = auth.NewDefaultGraphClientFactory(scopes)
 	state := defaultAddAccountState(scopes)
 	return state.handleAddAccount(registry, cfg)
 }
@@ -234,7 +268,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			return result, nil
 		} else if p != nil {
 			// Pending auth completed successfully — register the account.
-			client, err := graphClientFactory(p.cred)
+			client, err := s.graphClient(p.cred, p.mailProfile)
 			if err != nil {
 				logger.Error("graph client creation failed", "label", label, "error", err.Error())
 				return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
@@ -243,7 +277,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 				Label: label, ClientID: p.clientID, TenantID: p.tenantID,
 				AuthMethod: p.authMethod, Credential: p.cred, Authenticator: p.authenticator,
 				Client: client, AuthRecordPath: p.authRecordPath, CacheName: p.cacheName,
-				Authenticated: true,
+				Authenticated: true, MailProfile: p.mailProfile, Scopes: auth.ScopesForProfile(p.mailProfile),
 			}
 			if err := registry.Add(entry); err != nil {
 				logger.Error("account registration failed", "label", label, "error", err.Error())
@@ -251,6 +285,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			}
 			if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
 				Label: label, ClientID: p.clientID, TenantID: p.tenantID, AuthMethod: p.authMethod,
+				MailProfile: p.mailProfile.String(),
 			}); err != nil {
 				logger.Warn("failed to persist account config", "label", label, "error", err.Error())
 			}
@@ -275,6 +310,13 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 		clientID := request.GetString("client_id", cfg.ClientID)
 		tenantID := request.GetString("tenant_id", cfg.TenantID)
 		authMethod := request.GetString("auth_method", cfg.AuthMethod)
+		profile := auth.MailProfileFromConfig(cfg)
+		if requestedProfile := request.GetString("mail_profile", ""); requestedProfile != "" {
+			profile, err = auth.ParseMailProfile(requestedProfile)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
 
 		// Derive per-account auth record directory from the existing config path.
 		authRecordDir := filepath.Dir(cfg.AuthRecordPath)
@@ -289,7 +331,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 		}
 
 		// Perform inline authentication using elicitation.
-		authErr := s.authenticateInline(ctx, cred, authenticator, authRecordPath, authMethod, cacheName, clientID, tenantID, label, logger)
+		authErr := s.authenticateInline(ctx, cred, authenticator, authRecordPath, authMethod, cacheName, clientID, tenantID, label, logger, profile)
 		if authErr != nil {
 			// DeviceCodeFallbackError means elicitation failed but we captured the
 			// device code. Return it as successful tool result text so the user
@@ -303,7 +345,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 		}
 
 		// Create Graph client for the new account.
-		client, err := graphClientFactory(cred)
+		client, err := s.graphClient(cred, profile)
 		if err != nil {
 			logger.Error("graph client creation failed", "label", label, "error", err.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
@@ -321,6 +363,8 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			AuthRecordPath: authRecordPath,
 			CacheName:      cacheName,
 			Authenticated:  true,
+			MailProfile:    profile,
+			Scopes:         auth.ScopesForProfile(profile),
 		}
 
 		if err := registry.Add(entry); err != nil {
@@ -330,10 +374,11 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 
 		// Persist account identity configuration to accounts.json.
 		if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
-			Label:      label,
-			ClientID:   clientID,
-			TenantID:   tenantID,
-			AuthMethod: authMethod,
+			Label:       label,
+			ClientID:    clientID,
+			TenantID:    tenantID,
+			AuthMethod:  authMethod,
+			MailProfile: profile.String(),
 		}); err != nil {
 			logger.Warn("failed to persist account config", "label", label, "error", err.Error())
 		}
@@ -392,14 +437,15 @@ func (s *addAccountState) authenticateInline(
 	tenantID string,
 	label string,
 	logger *slog.Logger,
+	profile auth.MailProfile,
 ) error {
 	if authMethod == "browser" {
-		return s.authenticateBrowser(ctx, authenticator, authRecordPath, logger)
+		return s.authenticateBrowserWithScopes(ctx, authenticator, authRecordPath, logger, s.selectedScopes(profile))
 	}
 	if authMethod == "auth_code" {
-		return s.authenticateAuthCode(ctx, authenticator, authRecordPath, label, logger)
+		return s.authenticateAuthCodeWithScopes(ctx, authenticator, authRecordPath, label, logger, s.selectedScopes(profile))
 	}
-	return s.authenticateDeviceCode(ctx, cred, authenticator, authRecordPath, authMethod, cacheName, clientID, tenantID, label, logger)
+	return s.authenticateDeviceCode(ctx, cred, authenticator, authRecordPath, authMethod, cacheName, clientID, tenantID, label, logger, profile)
 }
 
 // authenticateBrowser performs browser authentication with URL mode elicitation.
@@ -413,6 +459,18 @@ func (s *addAccountState) authenticateBrowser(
 	authenticator auth.Authenticator,
 	authRecordPath string,
 	logger *slog.Logger,
+) error {
+	return s.authenticateBrowserWithScopes(ctx, authenticator, authRecordPath, logger, s.scopes)
+}
+
+// authenticateBrowserWithScopes performs browser authentication using the
+// delegated scopes selected for the account profile.
+func (s *addAccountState) authenticateBrowserWithScopes(
+	ctx context.Context,
+	authenticator auth.Authenticator,
+	authRecordPath string,
+	logger *slog.Logger,
+	scopes []string,
 ) error {
 	elicitationID := uuid.New().String()
 	loginURL := "https://login.microsoftonline.com"
@@ -429,7 +487,7 @@ func (s *addAccountState) authenticateBrowser(
 	authCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	_, err := s.authenticate(authCtx, authenticator, authRecordPath, s.scopes)
+	_, err := s.authenticate(authCtx, authenticator, authRecordPath, scopes)
 	if err != nil && elicitationFailed {
 		return fmt.Errorf( //nolint:staticcheck // ST1005: user-facing message displayed as tool result text
 			"A browser window was opened for Microsoft login but authentication was not completed in time. " +
@@ -463,12 +521,25 @@ func (s *addAccountState) authenticateAuthCode(
 	label string,
 	logger *slog.Logger,
 ) error {
+	return s.authenticateAuthCodeWithScopes(ctx, authenticator, authRecordPath, label, logger, s.scopes)
+}
+
+// authenticateAuthCodeWithScopes performs the auth-code exchange using the
+// delegated scopes selected for the account profile.
+func (s *addAccountState) authenticateAuthCodeWithScopes(
+	ctx context.Context,
+	authenticator auth.Authenticator,
+	authRecordPath string,
+	label string,
+	logger *slog.Logger,
+	scopes []string,
+) error {
 	acf, ok := authenticator.(auth.AuthCodeFlow)
 	if !ok {
 		return fmt.Errorf("credential does not support the auth_code flow")
 	}
 
-	authURL, err := acf.AuthCodeURL(ctx, s.scopes)
+	authURL, err := acf.AuthCodeURL(ctx, scopes)
 	if err != nil {
 		return fmt.Errorf("generate authorization URL: %w", err)
 	}
@@ -519,7 +590,7 @@ func (s *addAccountState) authenticateAuthCode(
 			return fmt.Errorf("no redirect URL provided in elicitation response")
 		}
 
-		if exchangeErr := acf.ExchangeCode(ctx, redirectURL, s.scopes); exchangeErr != nil {
+		if exchangeErr := acf.ExchangeCode(ctx, redirectURL, scopes); exchangeErr != nil {
 			return fmt.Errorf("exchange authorization code: %w", exchangeErr)
 		}
 
@@ -586,6 +657,7 @@ func (s *addAccountState) authenticateDeviceCode(
 	tenantID string,
 	label string,
 	logger *slog.Logger,
+	profile auth.MailProfile,
 ) error {
 	sendNotification(ctx, mcp.LoggingLevelWarning,
 		"Authentication required. Initiating device code login flow...")
@@ -607,12 +679,13 @@ func (s *addAccountState) authenticateDeviceCode(
 		clientID:       clientID,
 		tenantID:       tenantID,
 		authMethod:     authMethod,
+		mailProfile:    profile,
 		cancel:         cancel,
 		done:           make(chan struct{}),
 	}
 	go func() {
 		defer close(p.done)
-		_, p.err = s.authenticate(authCtx, authenticator, authRecordPath, s.scopes)
+		_, p.err = s.authenticate(authCtx, authenticator, authRecordPath, s.selectedScopes(profile))
 	}()
 
 	// Wait for the device code prompt, then present it via elicitation.

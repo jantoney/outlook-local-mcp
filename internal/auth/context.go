@@ -113,6 +113,12 @@ type AccountInfo struct {
 	// Empty when EnsureEmail has not yet run successfully for this account.
 	Email string
 
+	// MailProfile is the selected account's effective capability profile.
+	MailProfile MailProfile
+
+	// Scopes is the selected account's active delegated OAuth scope set.
+	Scopes []string
+
 	// Advisory is an optional human-readable note produced during account
 	// resolution — for example, when the resolver auto-selects the sole
 	// authenticated account while disconnected siblings also exist. Downstream

@@ -104,6 +104,9 @@ type statusAccount struct {
 	// (e.g., "browser", "device_code", "auth_code"). May be empty when the
 	// account was registered without a persisted method.
 	AuthMethod string `json:"auth_method"`
+
+	// MailProfile is the account's active cumulative capability profile.
+	MailProfile string `json:"mail_profile"`
 }
 
 // statusConfig contains all six configuration groups exposed by the status
@@ -230,6 +233,10 @@ type statusConfigFeatures struct {
 	// this flag is set (see CR-0058).
 	MailManageEnabled bool `json:"mail_manage_enabled"`
 
+	// MailSendEnabled indicates that the backward-compatible default profile
+	// includes human-confirmed draft sending.
+	MailSendEnabled bool `json:"mail_send_enabled"`
+
 	// ProvenanceTag is the extended property name for MCP-created events.
 	ProvenanceTag string `json:"provenance_tag"`
 }
@@ -282,6 +289,7 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 				Authenticated: entry.Authenticated,
 				UPN:           entry.Email,
 				AuthMethod:    entry.AuthMethod,
+				MailProfile:   entry.MailProfile.String(),
 			})
 		}
 
@@ -327,6 +335,7 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 					ReadOnly:          cfg.ReadOnly,
 					MailEnabled:       cfg.MailEnabled,
 					MailManageEnabled: cfg.MailManageEnabled,
+					MailSendEnabled:   cfg.MailSendEnabled,
 					ProvenanceTag:     cfg.ProvenanceTag,
 				},
 				Observability: statusConfigObservability{

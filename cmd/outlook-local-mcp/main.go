@@ -120,6 +120,8 @@ func main() {
 			AuthRecordPath: cfg.AuthRecordPath,
 			CacheName:      cfg.CacheName,
 			Authenticated:  true,
+			MailProfile:    auth.MailProfileFromConfig(cfg),
+			Scopes:         append([]string(nil), scopes...),
 		}); err != nil {
 			slog.Error("default account registration failed", "error", err)
 			os.Exit(1)
@@ -130,10 +132,9 @@ func main() {
 	// Accounts with valid cached tokens get a functional Graph client;
 	// accounts with expired tokens are registered for deferred re-auth.
 	authRecordDir := auth.AuthRecordDir(cfg.AuthRecordPath)
-	restored, total := auth.RestoreAccounts(
+	restored, total := auth.RestoreAccountsByProfile(
 		cfg.AccountsPath, cfg.CacheName, authRecordDir,
-		registry, auth.SetupCredentialForAccount, auth.NewDefaultGraphClientFactory(scopes),
-		scopes, cfg.TokenStorage,
+		registry, auth.SetupCredentialForAccount, auth.MailProfileFromConfig(cfg), cfg.TokenStorage,
 	)
 	if total > 0 {
 		slog.Info("additional accounts loaded",

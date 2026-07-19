@@ -665,9 +665,13 @@ func FormatAccountsText(accounts []map[string]any) string {
 		}
 		email, _ := a["email"].(string)
 		method, _ := a["auth_method"].(string)
+		profile, _ := a["mail_profile"].(string)
 		parenthetical := state
 		if method != "" {
 			parenthetical = state + ", " + method
+		}
+		if profile != "" {
+			parenthetical += ", " + profile
 		}
 		if email != "" {
 			fmt.Fprintf(&b, "%d. %s — %s (%s)\n", i+1, label, email, parenthetical)
@@ -746,13 +750,21 @@ func FormatStatusText(status statusResponse) string {
 			if acct.Authenticated {
 				state = "authenticated"
 			}
+			details := make([]string, 0, 2)
+			if acct.AuthMethod != "" {
+				details = append(details, acct.AuthMethod)
+			}
+			if acct.MailProfile != "" {
+				details = append(details, acct.MailProfile)
+			}
+			detailText := strings.Join(details, ", ")
 			switch {
-			case acct.UPN != "" && acct.AuthMethod != "":
-				fmt.Fprintf(&b, "  %s: %s — %s (%s)\n", acct.Label, state, acct.UPN, acct.AuthMethod)
+			case acct.UPN != "" && detailText != "":
+				fmt.Fprintf(&b, "  %s: %s — %s (%s)\n", acct.Label, state, acct.UPN, detailText)
 			case acct.UPN != "":
 				fmt.Fprintf(&b, "  %s: %s — %s\n", acct.Label, state, acct.UPN)
-			case acct.AuthMethod != "":
-				fmt.Fprintf(&b, "  %s: %s (%s)\n", acct.Label, state, acct.AuthMethod)
+			case detailText != "":
+				fmt.Fprintf(&b, "  %s: %s (%s)\n", acct.Label, state, detailText)
 			default:
 				fmt.Fprintf(&b, "  %s: %s\n", acct.Label, state)
 			}
@@ -772,7 +784,11 @@ func FormatStatusText(status statusResponse) string {
 	if status.Config.Features.MailManageEnabled {
 		mailManage = "on"
 	}
-	fmt.Fprintf(&b, "\nFeatures: read-only=%s, mail=%s, mail-manage=%s, provenance=%s", readOnly, mail, mailManage, status.Config.Features.ProvenanceTag)
+	mailSend := "off"
+	if status.Config.Features.MailSendEnabled {
+		mailSend = "on"
+	}
+	fmt.Fprintf(&b, "\nFeatures: read-only=%s, mail=%s, mail-manage=%s, provenance=%s, mail-send=%s", readOnly, mail, mailManage, status.Config.Features.ProvenanceTag, mailSend)
 
 	return b.String()
 }

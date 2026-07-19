@@ -39,6 +39,10 @@ type AccountConfig struct {
 	// without a Graph API call at startup. Empty for accounts created
 	// before CR-0056 or before EnsureEmail has run; backfilled lazily.
 	UPN string `json:"upn"`
+
+	// MailProfile is the stable per-account capability profile name. Empty
+	// records are legacy entries and derive their profile from server defaults.
+	MailProfile string `json:"mail_profile,omitempty"`
 }
 
 // AccountsFile is the top-level structure of the persistent accounts JSON file.
@@ -175,6 +179,41 @@ func RemoveAccountConfig(path string, label string) error {
 	}
 
 	return SaveAccounts(path, filtered)
+}
+
+// SetAccountMailProfile updates one persisted account's mail profile.
+// It rewrites accounts.json atomically through SaveAccounts and returns an
+// error when the label does not exist or the file cannot be read or written.
+func SetAccountMailProfile(path string, label string, profile MailProfile) error {
+	accounts, err := LoadAccounts(path)
+	if err != nil {
+		return err
+	}
+	for i := range accounts {
+		if accounts[i].Label != label {
+			continue
+		}
+		accounts[i].MailProfile = profile.String()
+		return SaveAccounts(path, accounts)
+	}
+	return fmt.Errorf("account %q not found in accounts file", label)
+}
+
+// UpsertAccountConfig replaces a persisted account with the same label or
+// appends config when the runtime account was previously implicit. It writes
+// through SaveAccounts and preserves the ordering of existing records.
+func UpsertAccountConfig(path string, config AccountConfig) error {
+	accounts, err := LoadAccounts(path)
+	if err != nil {
+		return err
+	}
+	for index := range accounts {
+		if accounts[index].Label == config.Label {
+			accounts[index] = config
+			return SaveAccounts(path, accounts)
+		}
+	}
+	return SaveAccounts(path, append(accounts, config))
 }
 
 // FindByIdentity searches accounts for the first entry whose ClientID and

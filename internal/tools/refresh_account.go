@@ -78,7 +78,6 @@ func NewRefreshAccountTool() mcp.Tool {
 // GetToken method. The underlying credential's token cache is updated with the
 // refreshed token.
 func HandleRefreshAccount(registry *auth.AccountRegistry, cfg config.Config) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	scopes := auth.Scopes(cfg)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 
@@ -98,6 +97,14 @@ func HandleRefreshAccount(registry *auth.AccountRegistry, cfg config.Config) fun
 		}
 		if entry.Credential == nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Account %q has no credential attached; use account_login to re-authenticate.", label)), nil
+		}
+		scopes := entry.Scopes
+		if len(scopes) == 0 {
+			profile := entry.MailProfile
+			if profile == auth.MailProfileCalendarOnly {
+				profile = auth.MailProfileFromConfig(cfg)
+			}
+			scopes = auth.ScopesForProfile(profile)
 		}
 
 		tok, err := entry.Credential.GetToken(ctx, policy.TokenRequestOptions{

@@ -115,6 +115,44 @@ func RestoreAccounts(
 	scopes []string,
 	tokenStorage string,
 ) (restored int, total int) {
+	return restoreAccounts(accountsPath, cacheNameBase, authRecordDir, registry, credFactory,
+		func(MailProfile) GraphClientFactory { return clientFactory },
+		func(MailProfile) []string { return scopes }, MailProfileCalendarOnly, tokenStorage)
+}
+
+// RestoreAccountsByProfile restores accounts using the OAuth scopes associated
+// with each persisted mail profile. Legacy entries inherit defaultProfile.
+// Each Graph client is constructed with the same profile-specific scope set
+// used for silent token acquisition.
+func RestoreAccountsByProfile(
+	accountsPath string,
+	cacheNameBase string,
+	authRecordDir string,
+	registry *AccountRegistry,
+	credFactory CredentialFactory,
+	defaultProfile MailProfile,
+	tokenStorage string,
+) (restored int, total int) {
+	return restoreAccounts(accountsPath, cacheNameBase, authRecordDir, registry, credFactory,
+		func(profile MailProfile) GraphClientFactory {
+			return NewDefaultGraphClientFactory(ScopesForProfile(profile))
+		},
+		ScopesForProfile, defaultProfile, tokenStorage)
+}
+
+// restoreAccounts contains the shared restoration loop for legacy fixed-scope
+// callers and profile-aware production startup.
+func restoreAccounts(
+	accountsPath string,
+	cacheNameBase string,
+	authRecordDir string,
+	registry *AccountRegistry,
+	credFactory CredentialFactory,
+	clientFactoryForProfile func(MailProfile) GraphClientFactory,
+	scopesForProfile func(MailProfile) []string,
+	defaultProfile MailProfile,
+	tokenStorage string,
+) (restored int, total int) {
 	accounts, err := LoadAccounts(accountsPath)
 	if err != nil {
 		slog.Warn("failed to load accounts file", "path", accountsPath, "error", err)
@@ -128,9 +166,29 @@ func RestoreAccounts(
 
 	slog.Info("restoring accounts from accounts file", "path", accountsPath, "count", total)
 
-	for _, acct := range accounts {
-		if restoreOne(acct, cacheNameBase, authRecordDir, registry, credFactory, clientFactory, scopes, tokenStorage) {
+	profilesChanged := false
+	for index, acct := range accounts {
+		profile := defaultProfile
+		if acct.MailProfile != "" {
+			parsed, parseErr := ParseMailProfile(acct.MailProfile)
+			if parseErr != nil {
+				slog.Warn("invalid persisted mail profile; using configured default", "account", acct.Label, "mail_profile", acct.MailProfile)
+			} else {
+				profile = parsed
+			}
+		}
+		if accounts[index].MailProfile != profile.String() {
+			accounts[index].MailProfile = profile.String()
+			profilesChanged = true
+		}
+		if restoreOne(acct, cacheNameBase, authRecordDir, registry, credFactory,
+			clientFactoryForProfile(profile), scopesForProfile(profile), profile, tokenStorage) {
 			restored++
+		}
+	}
+	if profilesChanged {
+		if err := SaveAccounts(accountsPath, accounts); err != nil {
+			slog.Warn("failed to persist derived account mail profiles", "path", accountsPath, "error", err)
 		}
 	}
 
@@ -180,6 +238,7 @@ func restoreOne(
 	credFactory CredentialFactory,
 	clientFactory GraphClientFactory,
 	scopes []string,
+	profile MailProfile,
 	tokenStorage string,
 ) bool {
 	logger := slog.With("account", acct.Label)
@@ -210,6 +269,8 @@ func restoreOne(
 		Authenticator:  authenticator,
 		AuthRecordPath: authRecordPath,
 		CacheName:      cacheName,
+		MailProfile:    profile,
+		Scopes:         append([]string(nil), scopes...),
 	}
 
 	// Populate Email from the persisted UPN so that downstream surfaces

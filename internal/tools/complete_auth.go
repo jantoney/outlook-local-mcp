@@ -85,7 +85,7 @@ func HandleCompleteAuth(cred auth.Authenticator, authRecordPath string, registry
 		logger.Debug("tool called")
 
 		// Resolve the target credential and auth record path.
-		targetCred, targetPath := cred, authRecordPath
+		targetCred, targetPath, targetScopes := cred, authRecordPath, scopes
 		if accountLabel := request.GetString("account", ""); accountLabel != "" {
 			if registry == nil {
 				return mcp.NewToolResultError(fmt.Sprintf("account %q specified but no account registry available", accountLabel)), nil
@@ -96,6 +96,14 @@ func HandleCompleteAuth(cred auth.Authenticator, authRecordPath string, registry
 			}
 			targetCred = entry.Authenticator
 			targetPath = entry.AuthRecordPath
+			targetScopes = entry.Scopes
+			if len(targetScopes) == 0 {
+				if entry.MailProfile == auth.MailProfileCalendarOnly {
+					targetScopes = scopes
+				} else {
+					targetScopes = auth.ScopesForProfile(entry.MailProfile)
+				}
+			}
 			logger = logger.With("account", accountLabel)
 		}
 
@@ -108,7 +116,7 @@ func HandleCompleteAuth(cred auth.Authenticator, authRecordPath string, registry
 		}
 
 		// Exchange the authorization code for tokens.
-		if exchangeErr := acf.ExchangeCode(ctx, redirectURL, scopes); exchangeErr != nil {
+		if exchangeErr := acf.ExchangeCode(ctx, redirectURL, targetScopes); exchangeErr != nil {
 			logger.Error("code exchange failed", "error", exchangeErr.Error())
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"Failed to exchange authorization code: %v\n\n"+

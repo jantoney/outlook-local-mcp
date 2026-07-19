@@ -45,6 +45,13 @@ type AccountEntry struct {
 	// so the account can be reconstructed after a server restart.
 	AuthMethod string
 
+	// MailProfile controls the mail scopes and verbs available to this account.
+	MailProfile MailProfile
+
+	// Scopes is the active delegated OAuth scope set used by this account's
+	// current Graph client. It is nil while the account is disconnected.
+	Scopes []string
+
 	// Credential is the Azure token credential used by the Graph SDK to
 	// obtain access tokens for API calls.
 	Credential azcore.TokenCredential

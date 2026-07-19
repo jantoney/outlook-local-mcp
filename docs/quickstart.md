@@ -145,10 +145,18 @@ All environment variables are prefixed with `OUTLOOK_MCP_`:
 | `DEFAULT_TIMEZONE` | `UTC` | IANA timezone for calendar operations |
 | `LOG_LEVEL` | `warn` | Log level: `debug`, `info`, `warn`, `error` |
 | `READ_ONLY` | `false` | Disable write tools (create, update, delete, cancel) |
+| `MAIL_ENABLED` | `false` | Default new/legacy accounts to `mail_read` |
+| `MAIL_MANAGE_ENABLED` | `false` | Default new/legacy accounts to `mail_manage`; implies mail read |
+| `MAIL_SEND_ENABLED` | `false` | Default new/legacy accounts to `mail_send`; implies manage/read |
+| `ATTACHMENT_ROOTS` | *(empty)* | Platform path-list of directories allowed for local draft attachments |
 | `LOG_FORMAT` | `json` | Log format: `json` or `text` |
 | `LOG_SANITIZE` | `true` | Mask PII in log output |
 | `LOG_FILE` | *(empty = disabled)* | Log file path for persistent file output |
 | `ACCOUNTS_PATH` | `~/.outlook-local-mcp/accounts.json` | Path to the persistent accounts file for multi-account support (see CR-0032) |
+
+### Using an app registration you own
+
+For predictable work, school, and personal account support, create a Microsoft identity platform public-client registration with **Accounts in any organizational directory and personal Microsoft accounts** (`AzureADandPersonalMicrosoftAccount`) and access-token version 2. Add the delegated Graph permissions `User.Read` and `Calendars.ReadWrite`, plus only the mail permissions required by the profiles you will use (`Mail.Read`, `Mail.ReadWrite`, and optionally `Mail.Send`). Enable public-client flows, add the mobile/desktop redirect URIs `http://localhost` and `https://login.microsoftonline.com/common/oauth2/nativeclient`, and do not create a client secret. Set `OUTLOOK_MCP_CLIENT_ID` to that application ID and keep `OUTLOOK_MCP_TENANT_ID=common` to allow both organizational and personal accounts.
 
 ## Getting help in-session
 

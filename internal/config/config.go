@@ -141,9 +141,13 @@ type Config struct {
 	// reading mail. Enabling this option also implicitly enables MailEnabled:
 	// LoadConfig forces MailEnabled to true whenever MailManageEnabled is true,
 	// since management capabilities are a superset of read-only mail access.
-	// Mail.Send is never requested; sending remains a user-only action. Configurable
+	// Mail.Send is requested only by the separate mail_send profile. Configurable
 	// via OUTLOOK_MCP_MAIL_MANAGE_ENABLED (default: "false").
 	MailManageEnabled bool
+
+	// MailSendEnabled controls the legacy/default account's ability to send an
+	// existing draft. It defaults to false and implies mail management.
+	MailSendEnabled bool
 
 	// MaxAttachmentSizeBytes is the maximum size in bytes for attachment
 	// content returned by the mail_get_attachment tool. Attachments whose
@@ -151,6 +155,10 @@ type Config struct {
 	// rather than load the content into memory. Configurable via
 	// OUTLOOK_MCP_MAX_ATTACHMENT_SIZE_BYTES (default: 10485760, i.e. 10 MB).
 	MaxAttachmentSizeBytes int64
+
+	// AttachmentRoots lists canonical root directories from which local draft
+	// attachments may be read. Empty disables local attachment upload.
+	AttachmentRoots []string
 
 	// ProvenanceTag is the name component of the single-value extended property
 	// used to tag MCP-created calendar events. The full property ID is built by
@@ -295,6 +303,11 @@ func LoadConfig() Config {
 
 	cfg.MailEnabled = strings.EqualFold(GetEnv("OUTLOOK_MCP_MAIL_ENABLED", "false"), "true")
 	cfg.MailManageEnabled = strings.EqualFold(GetEnv("OUTLOOK_MCP_MAIL_MANAGE_ENABLED", "false"), "true")
+	cfg.MailSendEnabled = strings.EqualFold(GetEnv("OUTLOOK_MCP_MAIL_SEND_ENABLED", "false"), "true")
+
+	if cfg.MailSendEnabled {
+		cfg.MailManageEnabled = true
+	}
 
 	// Mail management is a superset of read-only mail access. Enabling
 	// MailManageEnabled implicitly enables MailEnabled so that mail tool
@@ -311,6 +324,7 @@ func LoadConfig() Config {
 		maxAttach = 10485760
 	}
 	cfg.MaxAttachmentSizeBytes = maxAttach
+	cfg.AttachmentRoots = filepath.SplitList(GetEnv("OUTLOOK_MCP_ATTACHMENT_ROOTS", ""))
 
 	// ProvenanceTag uses os.Getenv directly so that an explicit empty value
 	// disables tagging, while an unset variable uses the default tag name.

@@ -541,17 +541,17 @@ func TestSetupCredentialForAccount_InvalidMethod(t *testing.T) {
 	}
 }
 
-// TestScopes_CalendarOnly validates that Scopes returns only the calendar scope
-// when MailEnabled is false.
+// TestScopes_CalendarOnly validates that Scopes returns identity and calendar
+// scopes when mail is disabled.
 func TestScopes_CalendarOnly(t *testing.T) {
 	cfg := config.Config{MailEnabled: false}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 1 {
-		t.Fatalf("Scopes() returned %d scopes, want 1", len(scopes))
+	if len(scopes) != 2 {
+		t.Fatalf("Scopes() returned %d scopes, want 2", len(scopes))
 	}
-	if scopes[0] != "Calendars.ReadWrite" {
-		t.Errorf("Scopes()[0] = %q, want %q", scopes[0], "Calendars.ReadWrite")
+	if scopes[0] != "User.Read" || scopes[1] != "Calendars.ReadWrite" {
+		t.Errorf("Scopes() = %v, want User.Read and Calendars.ReadWrite", scopes)
 	}
 }
 
@@ -561,14 +561,14 @@ func TestScopes_WithMail(t *testing.T) {
 	cfg := config.Config{MailEnabled: true}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 2 {
-		t.Fatalf("Scopes() returned %d scopes, want 2", len(scopes))
+	if len(scopes) != 3 {
+		t.Fatalf("Scopes() returned %d scopes, want 3", len(scopes))
 	}
-	if scopes[0] != "Calendars.ReadWrite" {
-		t.Errorf("Scopes()[0] = %q, want %q", scopes[0], "Calendars.ReadWrite")
+	if scopes[0] != "User.Read" || scopes[1] != "Calendars.ReadWrite" {
+		t.Errorf("Scopes() identity/calendar prefix = %v", scopes[:2])
 	}
-	if scopes[1] != "Mail.Read" {
-		t.Errorf("Scopes()[1] = %q, want %q", scopes[1], "Mail.Read")
+	if scopes[2] != "Mail.Read" {
+		t.Errorf("Scopes()[2] = %q, want %q", scopes[2], "Mail.Read")
 	}
 }
 
@@ -578,14 +578,14 @@ func TestScopes_MailManage(t *testing.T) {
 	cfg := config.Config{MailEnabled: true, MailManageEnabled: true}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 2 {
-		t.Fatalf("Scopes() returned %d scopes, want 2", len(scopes))
+	if len(scopes) != 3 {
+		t.Fatalf("Scopes() returned %d scopes, want 3", len(scopes))
 	}
-	if scopes[0] != "Calendars.ReadWrite" {
-		t.Errorf("Scopes()[0] = %q, want %q", scopes[0], "Calendars.ReadWrite")
+	if scopes[0] != "User.Read" || scopes[1] != "Calendars.ReadWrite" {
+		t.Errorf("Scopes() identity/calendar prefix = %v", scopes[:2])
 	}
-	if scopes[1] != "Mail.ReadWrite" {
-		t.Errorf("Scopes()[1] = %q, want %q", scopes[1], "Mail.ReadWrite")
+	if scopes[2] != "Mail.ReadWrite" {
+		t.Errorf("Scopes()[2] = %q, want %q", scopes[2], "Mail.ReadWrite")
 	}
 	for _, s := range scopes {
 		if s == "Mail.Read" {
@@ -617,10 +617,9 @@ func TestScopes_MailManageImpliesRead(t *testing.T) {
 	}
 }
 
-// TestScopes_NoMailSend validates that Scopes never requests Mail.Send
-// regardless of configuration. Sending mail is intentionally not in the
-// server's capability surface.
-func TestScopes_NoMailSend(t *testing.T) {
+// TestScopes_NoMailSendByDefault validates that legacy/default profiles do not
+// request Mail.Send unless the explicit send flag is enabled.
+func TestScopes_NoMailSendByDefault(t *testing.T) {
 	cases := []config.Config{
 		{},
 		{MailEnabled: true},
@@ -634,6 +633,14 @@ func TestScopes_NoMailSend(t *testing.T) {
 				t.Errorf("case %d: Scopes() must not include Mail.Send; got %v", i, scopes)
 			}
 		}
+	}
+}
+
+// TestScopes_MailSendEnabled validates the explicit global default profile.
+func TestScopes_MailSendEnabled(t *testing.T) {
+	scopes := Scopes(config.Config{MailSendEnabled: true})
+	if scopes[len(scopes)-1] != "Mail.Send" {
+		t.Fatalf("Scopes() = %v, want Mail.Send", scopes)
 	}
 }
 

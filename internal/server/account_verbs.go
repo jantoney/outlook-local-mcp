@@ -95,6 +95,10 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 			mcp.WithString("auth_method",
 				mcp.Description("Authentication method: 'browser', 'device_code', or 'auth_code'. Defaults to the server's configured method."),
 			),
+			mcp.WithString("mail_profile",
+				mcp.Description("Capability profile: calendar_only, mail_read, mail_manage, or mail_send. Defaults to global flags."),
+				mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send"),
+			),
 		},
 	}
 
@@ -199,6 +203,27 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		},
 	}
 
+	setMailProfileVerb := tools.Verb{
+		Name:        "set_mail_profile",
+		Summary:     "change an account capability profile and require reauthentication",
+		Description: "Changes one account's mail profile, clears its local cached tokens, and disconnects it. Call account.login afterward. Lower profiles block disallowed operations immediately; revoke Microsoft app consent separately when full grant revocation is required.",
+		SeeDocs:     []string{"concepts#per-account-mail-profiles", "troubleshooting#revoke-microsoft-app-consent"},
+		Handler: wrap("account.set_mail_profile", "write", ReadOnlyGuard(
+			"account.set_mail_profile", c.cfg.ReadOnly, tools.HandleSetMailProfile(c.registry, c.cfg.AccountsPath))),
+		Annotations: []mcp.ToolOption{
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+		},
+		Schema: []mcp.ToolOption{
+			mcp.WithString("label", mcp.Required(), mcp.Description("Label of the account to change.")),
+			mcp.WithString("mail_profile", mcp.Required(),
+				mcp.Description("New capability profile."),
+				mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send")),
+		},
+	}
+
 	verbs := []tools.Verb{
 		help.NewHelpVerb(registryPtr),
 		addVerb,
@@ -207,6 +232,7 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		loginVerb,
 		logoutVerb,
 		refreshVerb,
+		setMailProfileVerb,
 	}
 
 	return verbs, registryPtr

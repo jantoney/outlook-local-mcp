@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -68,6 +69,15 @@ type AuditEntry struct {
 
 	// CalendarID is the calendar identifier extracted from parameters, if present.
 	CalendarID string `json:"calendar_id,omitempty"`
+
+	// Account is the selected account label for the operation.
+	Account string `json:"account,omitempty"`
+
+	// MailProfile is the selected account's effective mail capability profile.
+	MailProfile string `json:"mail_profile,omitempty"`
+
+	// ResourceID is the primary message, event, calendar, or attachment ID.
+	ResourceID string `json:"resource_id,omitempty"`
 }
 
 // MaskAuditEmail masks an email address by keeping only the first character of
@@ -246,6 +256,13 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 		if v, ok := args["calendar_id"].(string); ok {
 			calendarID = v
 		}
+		account := argumentString(args, "account", "label")
+		mailProfile := argumentString(args, "mail_profile")
+		if info, ok := auth.AccountInfoFromContext(ctx); ok {
+			account = info.Label
+			mailProfile = info.MailProfile.String()
+		}
+		resourceID := argumentString(args, "message_id", "event_id", "calendar_id", "attachment_id")
 
 		entry := AuditEntry{
 			Audit:         true,
@@ -258,9 +275,23 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 			ErrorMessage:  errMsg,
 			EventID:       eventID,
 			CalendarID:    calendarID,
+			Account:       account,
+			MailProfile:   mailProfile,
+			ResourceID:    resourceID,
 		}
 		EmitAuditLog(entry)
 
 		return result, err
 	}
+}
+
+// argumentString returns the first non-empty string argument named by keys.
+// It centralizes stable resource and account extraction for audit records.
+func argumentString(args map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := args[key].(string); ok && value != "" {
+			return value
+		}
+	}
+	return ""
 }

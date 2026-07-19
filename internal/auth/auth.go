@@ -16,6 +16,9 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
+// userReadScope permits resolving the signed-in account through Graph /me.
+const userReadScope = "User.Read"
+
 // calendarScope is the OAuth scope requested for Microsoft Graph calendar
 // operations. The azidentity library automatically includes offline_access
 // to obtain a refresh token.
@@ -29,39 +32,58 @@ const mailScope = "Mail.Read"
 // mailReadWriteScope is the OAuth scope requested for draft-centric mail
 // management. It is a superset of Mail.Read and permits creating, updating,
 // and deleting messages (including drafts). It is requested in place of
-// mailScope when MailManageEnabled is true. Mail.Send is intentionally never
-// requested: sending remains a user-only action performed in Outlook.
+// mailScope when MailManageEnabled is true.
 const mailReadWriteScope = "Mail.ReadWrite"
+
+// mailSendScope permits sending an existing draft for accounts whose explicit
+// risk profile enables that capability.
+const mailSendScope = "Mail.Send"
 
 // Scopes returns the OAuth scope slice based on the application configuration.
 // The calendar scope is always included. Mail scopes are selected according to
 // configuration:
 //
-//   - When cfg.MailManageEnabled is true, mailReadWriteScope ("Mail.ReadWrite")
+//   - When cfg.MailSendEnabled is true, Mail.ReadWrite and Mail.Send are
+//     appended.
+//   - Otherwise, when cfg.MailManageEnabled is true, mailReadWriteScope ("Mail.ReadWrite")
 //     is appended. This scope subsumes Mail.Read, so mailScope is not also
 //     added.
 //   - Otherwise, when cfg.MailEnabled is true, mailScope ("Mail.Read") is
 //     appended.
 //   - When both flags are false, no mail scope is requested.
 //
-// Scopes never includes "Mail.Send"; sending mail is deliberately outside the
-// server's capability surface.
-//
 // Parameters:
-//   - cfg: the application configuration providing MailEnabled and
-//     MailManageEnabled.
+//   - cfg: application configuration providing mail read, manage, and send flags.
 //
 // Returns the slice of OAuth scopes to request during authentication and
 // Graph client initialization.
 func Scopes(cfg config.Config) []string {
-	scopes := []string{calendarScope}
 	switch {
+	case cfg.MailSendEnabled:
+		return ScopesForProfile(MailProfileSend)
 	case cfg.MailManageEnabled:
-		scopes = append(scopes, mailReadWriteScope)
+		return ScopesForProfile(MailProfileManage)
 	case cfg.MailEnabled:
-		scopes = append(scopes, mailScope)
+		return ScopesForProfile(MailProfileRead)
+	default:
+		return ScopesForProfile(MailProfileCalendarOnly)
 	}
-	return scopes
+}
+
+// ScopesForProfile returns the exact delegated Graph scopes requested for one
+// account. The returned slice is newly allocated and safe for callers to keep.
+func ScopesForProfile(profile MailProfile) []string {
+	scopes := []string{userReadScope, calendarScope}
+	switch profile {
+	case MailProfileRead:
+		return append(scopes, mailScope)
+	case MailProfileManage:
+		return append(scopes, mailReadWriteScope)
+	case MailProfileSend:
+		return append(scopes, mailReadWriteScope, mailSendScope)
+	default:
+		return scopes
+	}
 }
 
 // Authenticator is the interface for performing explicit authentication and

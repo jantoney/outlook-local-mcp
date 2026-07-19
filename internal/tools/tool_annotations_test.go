@@ -294,3 +294,33 @@ func TestPerVerbAnnotations_DocumentedInHelp(t *testing.T) {
 		})
 	}
 }
+
+// TestCR0066PerVerbAnnotations_DocumentedInHelp asserts the new capability
+// verbs expose their explicit safety semantics through domain help.
+func TestCR0066PerVerbAnnotations_DocumentedInHelp(t *testing.T) {
+	s := buildTestServer(t, config.Config{
+		AuthRecordPath: "/tmp/test", CacheName: "test", AuthMethod: "browser",
+		MailSendEnabled: true,
+	})
+	checks := map[string][]string{
+		"mail": {
+			"add_attachment", "send_draft",
+			"Safety: read-only=false, destructive=false, idempotent=false, open-world=true",
+		},
+		"account": {
+			"set_mail_profile",
+			"Safety: read-only=false, destructive=false, idempotent=true, open-world=false",
+		},
+	}
+	for domain, expected := range checks {
+		msg := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + domain + `","arguments":{"operation":"help"}}}`
+		resp := s.HandleMessage(context.Background(), json.RawMessage(msg)).(mcp.JSONRPCResponse)
+		result := resp.Result.(*mcp.CallToolResult)
+		text := result.Content[0].(mcp.TextContent).Text
+		for _, fragment := range expected {
+			if !strings.Contains(text, fragment) {
+				t.Errorf("%s help omitted %q", domain, fragment)
+			}
+		}
+	}
+}

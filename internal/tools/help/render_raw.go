@@ -31,6 +31,9 @@ type verbRaw struct {
 	// SeeDocs holds documentation references in slug or slug#anchor form (CR-0065 FR-10).
 	SeeDocs []string `json:"see_docs,omitempty"`
 
+	// MinimumProfile is the least selected-account mail capability required.
+	MinimumProfile string `json:"minimum_profile,omitempty"`
+
 	// Parameters lists the verb's input parameters extracted from the Schema
 	// options (name, type, required, description, enum). Omitted when the
 	// verb takes no parameters.
@@ -54,12 +57,13 @@ func renderRaw(verbs []tools.Verb) *mcp.CallToolResult {
 	raws := make([]verbRaw, len(verbs))
 	for i, v := range verbs {
 		raws[i] = verbRaw{
-			Name:        v.Name,
-			Summary:     v.Summary,
-			Description: v.Description,
-			Examples:    toExampleJSON(v.Examples),
-			SeeDocs:     v.SeeDocs,
-			Parameters:  verbParameters(v),
+			Name:           v.Name,
+			Summary:        v.Summary,
+			Description:    v.Description,
+			Examples:       toExampleJSON(v.Examples),
+			SeeDocs:        v.SeeDocs,
+			MinimumProfile: v.MinimumProfile,
+			Parameters:     verbParameters(v),
 		}
 	}
 

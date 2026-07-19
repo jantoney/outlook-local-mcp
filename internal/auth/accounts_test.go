@@ -37,6 +37,28 @@ func TestSaveAndLoadAccounts(t *testing.T) {
 	}
 }
 
+// TestAccountProfileRoundTrip verifies that account-specific risk profiles
+// survive persistence without changing their stable string representation.
+func TestAccountProfileRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	want := []AccountConfig{{
+		Label: "operations", ClientID: "client", TenantID: "common",
+		AuthMethod: "device_code", MailProfile: "mail_send",
+	}}
+	if err := SaveAccounts(path, want); err != nil {
+		t.Fatalf("SaveAccounts() error = %v", err)
+	}
+	got, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+	if len(got) != 1 || got[0].MailProfile != "mail_send" {
+		t.Fatalf("LoadAccounts() = %+v, want mail_send profile", got)
+	}
+}
+
 // TestLoadAccounts_FileNotExist verifies that LoadAccounts returns an empty
 // slice with no error when the accounts file does not exist.
 func TestLoadAccounts_FileNotExist(t *testing.T) {
@@ -89,6 +111,20 @@ func TestAddAccountConfig(t *testing.T) {
 	}
 	if got[1].Label != "personal" {
 		t.Errorf("account[1].Label = %q, want %q", got[1].Label, "personal")
+	}
+}
+
+// TestUpsertAccountConfigAddsImplicitAccount verifies a runtime-only default
+// account becomes a complete persisted record when its profile is changed.
+func TestUpsertAccountConfigAddsImplicitAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	want := AccountConfig{Label: "default", ClientID: "client", TenantID: "common", AuthMethod: "device_code", UPN: "me@example.com", MailProfile: "mail_read"}
+	if err := UpsertAccountConfig(path, want); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := LoadAccounts(path)
+	if err != nil || len(accounts) != 1 || accounts[0] != want {
+		t.Fatalf("LoadAccounts() = (%+v, %v), want %+v", accounts, err, want)
 	}
 }
 

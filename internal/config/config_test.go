@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -967,6 +969,29 @@ func TestLoadConfig_MailManageEnabledDefault(t *testing.T) {
 
 	if cfg.MailManageEnabled {
 		t.Error("MailManageEnabled should default to false when OUTLOOK_MCP_MAIL_MANAGE_ENABLED is unset")
+	}
+}
+
+// TestLoadConfig_MailSendImpliesManageAndRead verifies the cumulative legacy
+// default flags used to derive a mail_send account profile.
+func TestLoadConfig_MailSendImpliesManageAndRead(t *testing.T) {
+	t.Setenv("OUTLOOK_MCP_MAIL_ENABLED", "false")
+	t.Setenv("OUTLOOK_MCP_MAIL_MANAGE_ENABLED", "false")
+	t.Setenv("OUTLOOK_MCP_MAIL_SEND_ENABLED", "true")
+	cfg := LoadConfig()
+	if !cfg.MailSendEnabled || !cfg.MailManageEnabled || !cfg.MailEnabled {
+		t.Fatalf("mail flags are not cumulative: send=%v manage=%v read=%v", cfg.MailSendEnabled, cfg.MailManageEnabled, cfg.MailEnabled)
+	}
+}
+
+// TestLoadConfig_AttachmentRootsUsesPlatformPathList verifies local attachment
+// roots follow the host OS path-list separator.
+func TestLoadConfig_AttachmentRootsUsesPlatformPathList(t *testing.T) {
+	want := []string{t.TempDir(), t.TempDir()}
+	t.Setenv("OUTLOOK_MCP_ATTACHMENT_ROOTS", strings.Join(want, string(os.PathListSeparator)))
+	cfg := LoadConfig()
+	if !reflect.DeepEqual(cfg.AttachmentRoots, want) {
+		t.Fatalf("AttachmentRoots = %v, want %v", cfg.AttachmentRoots, want)
 	}
 }
 
