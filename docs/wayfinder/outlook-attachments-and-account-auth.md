@@ -23,11 +23,12 @@ An approved, implementation-ready Change Request that specifies local-file attac
 - [Choose the MCP local-file trust boundary](tickets/choose-mcp-local-file-trust-boundary.md) — accept one path within explicitly configured canonical attachment roots; upload is disabled when no roots are configured.
 - [Choose the upstream baseline and compatibility target](tickets/choose-upstream-baseline-and-compatibility-target.md) — build from fork `main` at `5b22fb5`, matching current upstream `main` rather than preserving the installed v0.4.0 surface.
 - [Choose per-account mail risk profiles](tickets/choose-per-account-mail-risk-profiles.md) — use cumulative account profiles from calendar-only through elicitation-confirmed draft sending; `Mail.Send` is requested only for `mail_send` accounts.
+- [Provision and verify the owned Entra application](tickets/provision-and-verify-owned-entra-application.md) — the owned `common` public client successfully authenticated one organizational and one personal account through device code and completed Graph calendar reads with least-privilege `calendar_only` consent.
 
 ## Not yet specified
 
-- Whether app provisioning should be documented only or accompanied by an automated setup/check command depends on live Entra verification.
-- Live work/school and personal-account consent behavior remains to be verified with the owned app registration.
+None. Live verification made the remaining implementation questions precise;
+they now live in open child tickets.
 
 ## Out of scope
 
