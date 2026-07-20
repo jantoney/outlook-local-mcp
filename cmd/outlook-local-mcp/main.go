@@ -109,7 +109,13 @@ func main() {
 	// (CR-0064).
 	registry := auth.NewAccountRegistry()
 	if shouldAddImplicitDefault(cfg.AccountsPath, cfg.ClientID, cfg.TenantID) {
+		accountID, idErr := auth.NewAccountID()
+		if idErr != nil {
+			slog.Error("default account identity generation failed", "error", idErr)
+			os.Exit(1)
+		}
 		if err := registry.Add(&auth.AccountEntry{
+			AccountID:      accountID,
 			Label:          "default",
 			ClientID:       cfg.ClientID,
 			TenantID:       cfg.TenantID,

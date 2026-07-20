@@ -85,6 +85,9 @@ func NewDefaultGraphClientFactory(scopes []string) GraphClientFactory {
 // If the accounts file does not exist, the function returns immediately with
 // no error and zero restored accounts. Individual account failures are logged
 // but do not prevent other accounts from being restored.
+// Before restoration, legacy records without immutable IDs are migrated with
+// an atomic accounts-file rewrite. Migration failures are logged and stop the
+// restore with zero counts so an unbound runtime account is never registered.
 //
 // Restore is idempotent for labels already present in the registry (e.g. the
 // "default" account registered at startup). Such entries are silently skipped
@@ -123,7 +126,8 @@ func RestoreAccounts(
 // RestoreAccountsByProfile restores accounts using the OAuth scopes associated
 // with each persisted mail profile. Legacy entries inherit defaultProfile.
 // Each Graph client is constructed with the same profile-specific scope set
-// used for silent token acquisition.
+// used for silent token acquisition. It performs the same persisted identity
+// migration, logging and returning zero counts if migration fails.
 func RestoreAccountsByProfile(
 	accountsPath string,
 	cacheNameBase string,
@@ -141,7 +145,10 @@ func RestoreAccountsByProfile(
 }
 
 // restoreAccounts contains the shared restoration loop for legacy fixed-scope
-// callers and profile-aware production startup.
+// callers and profile-aware production startup. It first persists missing
+// account identities; migration or load failures are logged and return zero
+// counts. Successful restoration mutates registry and may perform silent token
+// acquisition and Graph client construction through the supplied factories.
 func restoreAccounts(
 	accountsPath string,
 	cacheNameBase string,
@@ -153,6 +160,10 @@ func restoreAccounts(
 	defaultProfile MailProfile,
 	tokenStorage string,
 ) (restored int, total int) {
+	if err := MigrateAccountIDs(accountsPath); err != nil {
+		slog.Warn("failed to migrate account identities", "path", accountsPath, "error", err)
+		return 0, 0
+	}
 	accounts, err := LoadAccounts(accountsPath)
 	if err != nil {
 		slog.Warn("failed to load accounts file", "path", accountsPath, "error", err)
@@ -261,6 +272,7 @@ func restoreOne(
 	}
 
 	entry := &AccountEntry{
+		AccountID:      acct.AccountID,
 		Label:          acct.Label,
 		ClientID:       acct.ClientID,
 		TenantID:       acct.TenantID,

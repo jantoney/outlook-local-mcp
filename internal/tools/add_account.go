@@ -268,13 +268,17 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			return result, nil
 		} else if p != nil {
 			// Pending auth completed successfully — register the account.
+			accountID, idErr := auth.NewAccountID()
+			if idErr != nil {
+				return mcp.NewToolResultError("failed to create account identity: " + idErr.Error()), nil
+			}
 			client, err := s.graphClient(p.cred, p.mailProfile)
 			if err != nil {
 				logger.Error("graph client creation failed", "label", label, "error", err.Error())
 				return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
 			}
 			entry := &auth.AccountEntry{
-				Label: label, ClientID: p.clientID, TenantID: p.tenantID,
+				AccountID: accountID, Label: label, ClientID: p.clientID, TenantID: p.tenantID,
 				AuthMethod: p.authMethod, Credential: p.cred, Authenticator: p.authenticator,
 				Client: client, AuthRecordPath: p.authRecordPath, CacheName: p.cacheName,
 				Authenticated: true, MailProfile: p.mailProfile, Scopes: auth.ScopesForProfile(p.mailProfile),
@@ -284,7 +288,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
-				Label: label, ClientID: p.clientID, TenantID: p.tenantID, AuthMethod: p.authMethod,
+				AccountID: accountID, Label: label, ClientID: p.clientID, TenantID: p.tenantID, AuthMethod: p.authMethod,
 				MailProfile: p.mailProfile.String(),
 			}); err != nil {
 				logger.Warn("failed to persist account config", "label", label, "error", err.Error())
@@ -350,9 +354,14 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			logger.Error("graph client creation failed", "label", label, "error", err.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
 		}
+		accountID, err := auth.NewAccountID()
+		if err != nil {
+			return mcp.NewToolResultError("failed to create account identity: " + err.Error()), nil
+		}
 
 		// Register the account with identity metadata for persistence.
 		entry := &auth.AccountEntry{
+			AccountID:      accountID,
 			Label:          label,
 			ClientID:       clientID,
 			TenantID:       tenantID,
@@ -374,6 +383,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 
 		// Persist account identity configuration to accounts.json.
 		if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
+			AccountID:   accountID,
 			Label:       label,
 			ClientID:    clientID,
 			TenantID:    tenantID,

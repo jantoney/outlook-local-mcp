@@ -1,0 +1,11 @@
+{
+  "accounts": [
+    {
+      "label": "legacy-work",
+      "client_id": "legacy-client",
+      "tenant_id": "legacy-tenant",
+      "auth_method": "browser",
+      "upn": "legacy@example.com"
+    }
+  ]
+}

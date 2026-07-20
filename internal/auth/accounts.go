@@ -17,6 +17,11 @@ import (
 // These fields are persisted to the accounts JSON file and used to
 // reconstruct credentials after a server restart.
 type AccountConfig struct {
+	// AccountID is the immutable local provenance identity for this persisted
+	// account instance. Labels and UPNs may be reused after removal, but this
+	// identity is never reused or changed in place.
+	AccountID AccountID `json:"account_id,omitempty"`
+
 	// Label is the unique human-readable identifier for this account.
 	Label string `json:"label"`
 
@@ -135,12 +140,22 @@ func SaveAccounts(path string, accounts []AccountConfig) error {
 //   - path: absolute filesystem path to the accounts JSON file.
 //   - config: the account configuration to add.
 //
-// Returns an error if the file cannot be loaded or saved.
+// Returns an error if the file cannot be loaded or saved, the supplied
+// identity is malformed, or secure randomness cannot generate a missing
+// identity.
 //
 // Side effects: modifies the accounts file at path.
 func AddAccountConfig(path string, config AccountConfig) error {
 	accounts, err := LoadAccounts(path)
 	if err != nil {
+		return err
+	}
+	if config.AccountID == "" {
+		config.AccountID, err = NewAccountID()
+		if err != nil {
+			return err
+		}
+	} else if err := config.AccountID.Validate(); err != nil {
 		return err
 	}
 
@@ -201,7 +216,17 @@ func SetAccountMailProfile(path string, label string, profile MailProfile) error
 
 // UpsertAccountConfig replaces a persisted account with the same label or
 // appends config when the runtime account was previously implicit. It writes
-// through SaveAccounts and preserves the ordering of existing records.
+// through SaveAccounts, preserves the ordering of existing records, and never
+// replaces an existing immutable account identity.
+//
+// Parameters:
+//   - path: absolute filesystem path to the accounts JSON file.
+//   - config: the complete account configuration to insert or replace.
+//
+// Returns an error when loading or saving fails, an identity is malformed,
+// secure randomness cannot generate a missing identity, or the caller tries
+// to replace an existing identity. Its side effect is an atomic accounts-file
+// rewrite on success.
 func UpsertAccountConfig(path string, config AccountConfig) error {
 	accounts, err := LoadAccounts(path)
 	if err != nil {
@@ -209,11 +234,70 @@ func UpsertAccountConfig(path string, config AccountConfig) error {
 	}
 	for index := range accounts {
 		if accounts[index].Label == config.Label {
+			existingID := accounts[index].AccountID
+			if existingID == "" && config.AccountID == "" {
+				config.AccountID, err = NewAccountID()
+				if err != nil {
+					return err
+				}
+			} else if existingID == "" {
+				if err := config.AccountID.Validate(); err != nil {
+					return err
+				}
+			} else if config.AccountID == "" {
+				config.AccountID = accounts[index].AccountID
+			} else if config.AccountID != existingID {
+				return fmt.Errorf("account %q identity cannot be changed", config.Label)
+			}
 			accounts[index] = config
 			return SaveAccounts(path, accounts)
 		}
 	}
+	if config.AccountID == "" {
+		config.AccountID, err = NewAccountID()
+		if err != nil {
+			return err
+		}
+	} else if err := config.AccountID.Validate(); err != nil {
+		return err
+	}
 	return SaveAccounts(path, append(accounts, config))
+}
+
+// MigrateAccountIDs assigns and persists immutable identities for legacy
+// account records that predate account provenance. Existing identities are
+// validated and preserved. The migration is idempotent and rewrites the file
+// only when at least one identity is missing.
+//
+// Parameters:
+//   - path: absolute filesystem path to the accounts JSON file.
+//
+// Returns an error when the file cannot be loaded or saved, secure randomness
+// is unavailable, or an existing identity is malformed. Its only side effect
+// is an atomic accounts-file rewrite when migration is required.
+func MigrateAccountIDs(path string) error {
+	accounts, err := LoadAccounts(path)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for index := range accounts {
+		if accounts[index].AccountID != "" {
+			if err := accounts[index].AccountID.Validate(); err != nil {
+				return fmt.Errorf("account %q: %w", accounts[index].Label, err)
+			}
+			continue
+		}
+		accounts[index].AccountID, err = NewAccountID()
+		if err != nil {
+			return fmt.Errorf("account %q: %w", accounts[index].Label, err)
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return SaveAccounts(path, accounts)
 }
 
 // FindByIdentity searches accounts for the first entry whose ClientID and

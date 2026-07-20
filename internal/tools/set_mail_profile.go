@@ -49,7 +49,7 @@ func HandleSetMailProfile(registry *auth.AccountRegistry, accountsPath string) f
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		persistErr := auth.UpsertAccountConfig(accountsPath, auth.AccountConfig{
-			Label: label, ClientID: entry.ClientID, TenantID: entry.TenantID,
+			AccountID: entry.AccountID, Label: label, ClientID: entry.ClientID, TenantID: entry.TenantID,
 			AuthMethod: entry.AuthMethod, UPN: entry.Email, MailProfile: profile.String(),
 		})
 		var cleanupErrors []string

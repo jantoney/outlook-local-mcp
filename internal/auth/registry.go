@@ -25,6 +25,11 @@ var labelPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 // registry. Each field is populated during account creation (add_account
 // tool or startup registration of the default account).
 type AccountEntry struct {
+	// AccountID is the immutable local provenance identity of this account
+	// instance. It survives restart and changes only when an account is removed
+	// and deliberately recreated.
+	AccountID AccountID
+
 	// Label is the unique human-readable identifier for this account
 	// (e.g., "work", "personal", "default").
 	Label string

@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -123,8 +124,15 @@ func TestUpsertAccountConfigAddsImplicitAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	accounts, err := LoadAccounts(path)
-	if err != nil || len(accounts) != 1 || accounts[0] != want {
-		t.Fatalf("LoadAccounts() = (%+v, %v), want %+v", accounts, err, want)
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("LoadAccounts() = (%+v, %v), want one account", accounts, err)
+	}
+	if accounts[0].AccountID == "" {
+		t.Fatal("UpsertAccountConfig() did not generate an immutable account identity")
+	}
+	accounts[0].AccountID = ""
+	if accounts[0] != want {
+		t.Fatalf("LoadAccounts() = %+v, want %+v", accounts[0], want)
 	}
 }
 
@@ -315,5 +323,182 @@ func TestRemoveAccountConfig_NotFound(t *testing.T) {
 
 	if string(before) != string(after) {
 		t.Error("file content changed after removing non-existent label")
+	}
+}
+
+// TestMigrateAccountIDsPersistsLegacyIdentity verifies that migration assigns
+// one immutable identity to a legacy account and preserves it across reloads.
+func TestMigrateAccountIDsPersistsLegacyIdentity(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	legacy := []AccountConfig{{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+	}}
+	if err := SaveAccounts(path, legacy); err != nil {
+		t.Fatalf("SaveAccounts() error = %v", err)
+	}
+
+	if err := MigrateAccountIDs(path); err != nil {
+		t.Fatalf("MigrateAccountIDs() error = %v", err)
+	}
+	first, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+	if len(first) != 1 || first[0].AccountID == "" {
+		t.Fatalf("LoadAccounts() = %+v, want one migrated account identity", first)
+	}
+
+	if err := MigrateAccountIDs(path); err != nil {
+		t.Fatalf("second MigrateAccountIDs() error = %v", err)
+	}
+	second, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("second LoadAccounts() error = %v", err)
+	}
+	if second[0].AccountID != first[0].AccountID {
+		t.Fatalf("account identity changed across restart: got %q, want %q", second[0].AccountID, first[0].AccountID)
+	}
+}
+
+// TestLegacyAccountsDefaultSharedOff verifies deterministic legacy data gains
+// only immutable provenance and does not opt into shared access or scopes.
+func TestLegacyAccountsDefaultSharedOff(t *testing.T) {
+	t.Parallel()
+
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_accounts.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(fixture) error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	if err := os.WriteFile(path, fixture, 0o600); err != nil {
+		t.Fatalf("WriteFile(accounts) error = %v", err)
+	}
+
+	if err := MigrateAccountIDs(path); err != nil {
+		t.Fatalf("MigrateAccountIDs() error = %v", err)
+	}
+	accounts, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("LoadAccounts() count = %d, want 1", len(accounts))
+	}
+	got := accounts[0]
+	if got.Label != "legacy-work" || got.ClientID != "legacy-client" ||
+		got.TenantID != "legacy-tenant" || got.AuthMethod != "browser" ||
+		got.UPN != "legacy@example.com" || got.MailProfile != "" {
+		t.Fatalf("migration changed legacy behavior: %+v", got)
+	}
+	if got.AccountID == "" {
+		t.Fatal("migration did not assign account identity")
+	}
+	for _, scope := range ScopesForProfile(MailProfileCalendarOnly) {
+		if strings.HasSuffix(scope, ".Shared") {
+			t.Fatalf("legacy migration enabled shared scope %q", scope)
+		}
+	}
+	migrated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(migrated) error = %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(migrated)), "shared") {
+		t.Fatalf("legacy migration enabled shared access: %s", migrated)
+	}
+}
+
+// TestRemoveAndRecreateAccountGetsNewIdentity verifies that account removal is
+// a provenance revocation boundary even when the same label is deliberately reused.
+func TestRemoveAndRecreateAccountGetsNewIdentity(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	config := AccountConfig{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+	}
+	if err := AddAccountConfig(path, config); err != nil {
+		t.Fatalf("AddAccountConfig() error = %v", err)
+	}
+	first, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+	if len(first) != 1 || first[0].AccountID == "" {
+		t.Fatalf("first account = %+v, want generated identity", first)
+	}
+
+	if err := RemoveAccountConfig(path, "work"); err != nil {
+		t.Fatalf("RemoveAccountConfig() error = %v", err)
+	}
+	if err := AddAccountConfig(path, config); err != nil {
+		t.Fatalf("second AddAccountConfig() error = %v", err)
+	}
+	second, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("second LoadAccounts() error = %v", err)
+	}
+	if second[0].AccountID == first[0].AccountID {
+		t.Fatalf("recreated account reused identity %q", second[0].AccountID)
+	}
+}
+
+// TestUpsertAccountConfigPreservesIdentity verifies that presentation and
+// profile updates cannot silently replace an existing account identity.
+func TestUpsertAccountConfigPreservesIdentity(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	if err := AddAccountConfig(path, AccountConfig{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+	}); err != nil {
+		t.Fatalf("AddAccountConfig() error = %v", err)
+	}
+	before, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+
+	if err := UpsertAccountConfig(path, AccountConfig{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+		UPN: "alice@example.com", MailProfile: "mail_read",
+	}); err != nil {
+		t.Fatalf("UpsertAccountConfig() error = %v", err)
+	}
+	after, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("second LoadAccounts() error = %v", err)
+	}
+	if after[0].AccountID != before[0].AccountID {
+		t.Fatalf("UpsertAccountConfig() identity = %q, want %q", after[0].AccountID, before[0].AccountID)
+	}
+	if after[0].UPN != "alice@example.com" || after[0].MailProfile != "mail_read" {
+		t.Fatalf("UpsertAccountConfig() = %+v, want updated presentation and profile", after[0])
+	}
+}
+
+// TestUpsertLegacyAccountAssignsIdentity verifies that a direct update cannot
+// leave a pre-migration account without immutable provenance.
+func TestUpsertLegacyAccountAssignsIdentity(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	legacy := AccountConfig{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+	}
+	if err := SaveAccounts(path, []AccountConfig{legacy}); err != nil {
+		t.Fatalf("SaveAccounts() error = %v", err)
+	}
+	legacy.UPN = "alice@example.com"
+	if err := UpsertAccountConfig(path, legacy); err != nil {
+		t.Fatalf("UpsertAccountConfig() error = %v", err)
+	}
+	accounts, err := LoadAccounts(path)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+	if accounts[0].AccountID == "" {
+		t.Fatal("legacy upsert preserved an empty account identity")
 	}
 }

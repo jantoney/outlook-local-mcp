@@ -106,6 +106,10 @@ func AccountAuthFromContext(ctx context.Context) (AccountAuth, bool) {
 // AccountInfo holds the label and email of the account resolved for a request.
 // Email may be empty if the /me fetch has not yet completed for this account.
 type AccountInfo struct {
+	// AccountID is the immutable local provenance identity of the resolved
+	// signed-in account instance. It is never a user-facing selector.
+	AccountID AccountID
+
 	// Label is the unique account identifier (e.g., "default", "work").
 	Label string
 

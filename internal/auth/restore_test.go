@@ -205,6 +205,41 @@ func TestRestoreAccounts_EmptyFile(t *testing.T) {
 	}
 }
 
+// TestRestoreAccountsMigratesAndRegistersAccountIdentity verifies that startup
+// restoration persists a legacy identity and exposes the same identity in the
+// runtime registry.
+func TestRestoreAccountsMigratesAndRegistersAccountIdentity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	accountsPath := filepath.Join(dir, "accounts.json")
+	if err := SaveAccounts(accountsPath, []AccountConfig{{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+	}}); err != nil {
+		t.Fatalf("SaveAccounts() error = %v", err)
+	}
+
+	registry := NewAccountRegistry()
+	_, total := RestoreAccounts(
+		accountsPath, "test-cache", dir, registry, fakeCredentialFactory,
+		fakeGraphClient(false), []string{"Calendars.ReadWrite"}, "",
+	)
+	if total != 1 {
+		t.Fatalf("RestoreAccounts() total = %d, want 1", total)
+	}
+	persisted, err := LoadAccounts(accountsPath)
+	if err != nil {
+		t.Fatalf("LoadAccounts() error = %v", err)
+	}
+	entry, ok := registry.Get("work")
+	if !ok {
+		t.Fatal("restored account not found in registry")
+	}
+	if persisted[0].AccountID == "" || entry.AccountID != persisted[0].AccountID {
+		t.Fatalf("runtime identity = %q, persisted identity = %q", entry.AccountID, persisted[0].AccountID)
+	}
+}
+
 // TestRestoreAccounts_DuplicateLabel verifies that a restored account whose
 // label already exists in the registry is skipped without affecting the
 // existing entry.
