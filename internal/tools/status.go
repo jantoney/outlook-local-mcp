@@ -16,6 +16,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/config"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -120,6 +121,9 @@ type statusAccount struct {
 	// TokenTenantContext is the directory context proven by validated token
 	// tenant evidence, or unknown when no authoritative tenant GUID is present.
 	TokenTenantContext auth.TokenTenantContext `json:"token_tenant_context"`
+
+	// CalendarAliases is the complete account-scoped shared-calendar allowlist.
+	CalendarAliases []resource.CalendarAlias `json:"calendar_aliases"`
 }
 
 // statusConfig contains all six configuration groups exposed by the status
@@ -304,8 +308,12 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 				AuthMethod:            entry.AuthMethod,
 				MailPolicy:            entry.MailPolicy,
 				OutlookResourceRights: entry.MailPolicy,
-				OAuthScopes:           auth.ScopesForMailPolicy(entry.MailPolicy),
-				TokenTenantContext:    entry.EffectiveTokenTenantContext(),
+				OAuthScopes: auth.OAuthScopeUnion(
+					auth.ScopesForMailPolicy(entry.MailPolicy),
+					auth.ScopesForCalendarAliases(entry.CalendarAliases),
+				),
+				TokenTenantContext: entry.EffectiveTokenTenantContext(),
+				CalendarAliases:    append([]resource.CalendarAlias{}, entry.CalendarAliases...),
 			})
 		}
 

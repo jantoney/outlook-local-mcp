@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 )
 
 // FormatEventsText formats a slice of serialized summary event maps into a
@@ -670,6 +671,7 @@ func FormatAccountsText(accounts []map[string]any) string {
 		policy, _ := a["mail_policy"].(auth.MailActionPolicy)
 		tenantContext, _ := a["token_tenant_context"].(auth.TokenTenantContext)
 		scopes, _ := a["oauth_scopes"].([]string)
+		calendarAliases, _ := a["calendar_aliases"].([]resource.CalendarAlias)
 		tenantContext = auth.NormalizeTokenTenantContext(tenantContext)
 		if len(scopes) == 0 {
 			scopes = auth.ScopesForMailPolicy(policy)
@@ -679,8 +681,8 @@ func FormatAccountsText(accounts []map[string]any) string {
 			parenthetical = state + ", " + method
 		}
 		parenthetical += ", mail=" + formatMailPolicyText(policy)
-		diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s]",
-			tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(policy))
+		diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s; calendar-aliases=%d]",
+			tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(policy), len(calendarAliases))
 		if email != "" {
 			fmt.Fprintf(&b, "%d. %s — %s (%s)%s\n", i+1, label, email, parenthetical, diagnostics)
 		} else {
@@ -773,8 +775,8 @@ func FormatStatusText(status statusResponse) string {
 			if rights == (auth.MailActionPolicy{}) {
 				rights = acct.MailPolicy
 			}
-			diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s]",
-				tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(rights))
+			diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s; calendar-aliases=%d]",
+				tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(rights), len(acct.CalendarAliases))
 			switch {
 			case acct.UPN != "" && detailText != "":
 				fmt.Fprintf(&b, "  %s: %s — %s (%s)%s\n", acct.Label, state, acct.UPN, detailText, diagnostics)

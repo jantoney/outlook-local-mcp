@@ -20,6 +20,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/config"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -113,7 +114,8 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		}
 		mailPolicy := loginMailPolicy(entry, cfg)
 		profile := auth.LegacyProfileForPolicy(mailPolicy)
-		scopes := s.selectedScopes(profile)
+		calendarAliases := loginCalendarAliases(entry, cfg)
+		scopes := auth.OAuthScopeUnion(s.selectedScopes(profile), auth.ScopesForCalendarAliases(calendarAliases))
 
 		clientID := entry.ClientID
 		if clientID == "" {
@@ -172,7 +174,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			logger.Debug("silent token acquisition succeeded, skipping interactive auth", "label", label)
 		}
 
-		client, err := s.graphClient(cred, profile)
+		client, err := s.graphClientWithScopes(cred, profile, scopes)
 		if err != nil {
 			logger.Error("graph client creation failed", "label", label, "error", err.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
@@ -192,6 +194,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			e.MailPolicy = mailPolicy
 			e.Scopes = append([]string(nil), scopes...)
 			e.TokenTenantContext = auth.TokenTenantContextFromAuthState(authMethod, authRecordPath)
+			e.CalendarAliases = append([]resource.CalendarAlias(nil), calendarAliases...)
 			e.Email = ""
 		}); err != nil {
 			logger.Error("registry update failed", "label", label, "error", err.Error())
@@ -228,6 +231,17 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		logger.Info("account re-authenticated", "label", label, "upn", upn)
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+// loginCalendarAliases returns the authoritative persisted calendar allowlist,
+// falling back to the disconnected runtime snapshot only when persistence is
+// unavailable. The returned slice is newly allocated.
+func loginCalendarAliases(entry *auth.AccountEntry, cfg config.Config) []resource.CalendarAlias {
+	aliases, err := auth.AccountCalendarAliases(cfg.AccountsPath, entry.Label)
+	if err == nil {
+		return aliases
+	}
+	return append([]resource.CalendarAlias(nil), entry.CalendarAliases...)
 }
 
 // loginMailPolicy returns the authoritative persisted independent policy. It

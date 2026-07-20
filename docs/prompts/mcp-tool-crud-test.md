@@ -527,6 +527,18 @@ To verify AC-5 manually:
 3. **Pass:** The response says the policy is unchanged or updated immediately, the account remains available when scopes did not change, and a second account list shows `permanent_delete: false` with every other switch unchanged.
 4. **Fail:** The operation enables another action, writes a cumulative profile, or disconnects despite an unchanged scope set.
 
+### Step 29d -- Shared calendar alias lifecycle
+
+1. Call `{tool: "account", args: {operation: "list_calendar_aliases", label: "<selected-account>", output: "summary"}}`.
+2. If the selected account's `token_tenant_context` is not `organizational`, record the owner-primary lifecycle as **SKIP**. Otherwise add an off-profile owner-primary alias with a unique test name using `add_calendar_alias`.
+3. **Verify:** The result includes an immutable `resource_id`, kind `owner_primary_calendar`, view `owner`, and profile `off`; the account remains connected because the OAuth scope union did not change.
+4. Rename the alias with `rename_calendar_alias`, list again, and verify the `resource_id`, owner, kind, and view are unchanged.
+5. Attempt `set_calendar_alias_profile` with `manage`. **Pass:** local rejection explains owner-primary is read-only and no Graph call occurs.
+6. Remove the alias twice. **Pass:** both calls succeed, the second reports it already absent, and listing no longer contains it.
+7. Recreate the original alias name with profile `off`. **Pass:** the new `resource_id` differs from the removed identity. Remove the recreated test alias as cleanup.
+8. When read-only mode is enabled, **verify** add, rename, remove, profile, and reselection mutations are rejected before persistence or Graph traffic.
+9. If a genuinely shared mounted calendar is available, call `discover_calendar_aliases`; have the user select one returned ID; add it only with `confirm_mounted_selection: true`. **Fail:** if creation accepts an unconfirmed ID, an ID owned by another resource, or silently chooses a candidate.
+
 ### Step 30 -- Mail operations (skip if selected account has read disabled)
 
 Use the selected account's `mail_policy` from Step 1. If `read` is false, **skip** read-dependent Steps 30 through 36b and record them as SKIP.

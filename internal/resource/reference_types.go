@@ -3,9 +3,11 @@ package resource
 import (
 	"fmt"
 	"strings"
-
-	"github.com/desek/outlook-local-mcp/internal/auth"
 )
+
+// AccountID is the immutable local provenance identity of one signed-in
+// account instance. The auth package aliases this transport-neutral type.
+type AccountID string
 
 // ResourceID is the immutable local identity of one configured shared
 // resource. Alias renames preserve it; removal and recreation replace it.
@@ -73,7 +75,7 @@ type GraphID struct {
 // grants no Graph access by itself.
 type ReferenceClaims struct {
 	// AccountID binds the reference to one signed-in account instance.
-	AccountID auth.AccountID `json:"account_id"`
+	AccountID AccountID `json:"account_id"`
 	// ResourceID binds the reference to one shared resource instance.
 	ResourceID ResourceID `json:"resource_id"`
 	// ResourceKind binds the reference to the configured resource kind.

@@ -18,6 +18,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 )
 
@@ -119,7 +120,7 @@ func RestoreAccounts(
 	tokenStorage string,
 ) (restored int, total int) {
 	return restoreAccounts(accountsPath, cacheNameBase, authRecordDir, registry, credFactory,
-		func(MailProfile) GraphClientFactory { return clientFactory },
+		func([]string) GraphClientFactory { return clientFactory },
 		func(MailProfile) []string { return scopes }, MailProfileCalendarOnly, tokenStorage)
 }
 
@@ -138,8 +139,8 @@ func RestoreAccountsByProfile(
 	tokenStorage string,
 ) (restored int, total int) {
 	return restoreAccounts(accountsPath, cacheNameBase, authRecordDir, registry, credFactory,
-		func(profile MailProfile) GraphClientFactory {
-			return NewDefaultGraphClientFactory(ScopesForProfile(profile))
+		func(scopes []string) GraphClientFactory {
+			return NewDefaultGraphClientFactory(scopes)
 		},
 		ScopesForProfile, defaultProfile, tokenStorage)
 }
@@ -155,7 +156,7 @@ func restoreAccounts(
 	authRecordDir string,
 	registry *AccountRegistry,
 	credFactory CredentialFactory,
-	clientFactoryForProfile func(MailProfile) GraphClientFactory,
+	clientFactoryForScopes func([]string) GraphClientFactory,
 	scopesForProfile func(MailProfile) []string,
 	defaultProfile MailProfile,
 	tokenStorage string,
@@ -187,14 +188,25 @@ func restoreAccounts(
 			policy = *acct.MailPolicy
 		}
 		profile := LegacyProfileForPolicy(policy)
+		accountScopes := OAuthScopeUnion(scopesForProfile(profile), calendarAliasesFromConfig(acct))
 		if restoreOne(acct, cacheNameBase, authRecordDir, registry, credFactory,
-			clientFactoryForProfile(profile), scopesForProfile(profile), profile, tokenStorage) {
+			clientFactoryForScopes(accountScopes), accountScopes, profile, tokenStorage) {
 			restored++
 		}
 	}
 
 	slog.Info("account restoration complete", "restored", restored, "total", total)
 	return restored, total
+}
+
+// calendarAliasesFromConfig returns the shared-calendar scope contribution of
+// one persisted account without exposing its pointer-backed compatibility
+// representation to the restoration loop.
+func calendarAliasesFromConfig(account AccountConfig) []string {
+	if account.CalendarAliases == nil {
+		return nil
+	}
+	return ScopesForCalendarAliases(*account.CalendarAliases)
 }
 
 // restoreOne restores a single account from its persisted configuration.
@@ -275,6 +287,9 @@ func restoreOne(
 		MailPolicy:         MailPolicyFromProfile(profile),
 		Scopes:             append([]string(nil), scopes...),
 		TokenTenantContext: TokenTenantContextFromAuthState(acct.AuthMethod, authRecordPath),
+	}
+	if acct.CalendarAliases != nil {
+		entry.CalendarAliases = append([]resource.CalendarAlias(nil), (*acct.CalendarAliases)...)
 	}
 	if acct.MailPolicy != nil {
 		entry.MailPolicy = *acct.MailPolicy

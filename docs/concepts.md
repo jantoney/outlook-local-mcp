@@ -74,6 +74,16 @@ Each account has one deterministic, deduplicated OAuth scope union calculated fr
 
 `account.list` and `system.status` label `oauth_scopes` separately from `outlook_resource_rights`. OAuth scopes describe delegated consent requested from Microsoft identity. Outlook resource rights are the server's local action policy. Neither proves that Exchange grants access to a particular shared mailbox, folder, or calendar; Graph remains authoritative for resource-level access.
 
+## Shared calendar aliases
+
+Shared calendars are explicit account-scoped allowlist entries, not additional signed-in accounts. Calendar and mail aliases are separate families even when they name the same owner. Every calendar alias has an immutable resource ID, one owner, one kind, one mailbox view, and an exact `off`, `read`, or `manage` profile.
+
+An `owner_primary_calendar` identifies the owner's primary calendar in owner view. It is available only with an organizational token context and remains read-only. A `mounted_calendar` identifies one calendar in the signed-in recipient's view. Creation and reselection perform fresh `/me/calendars` discovery filtered by the configured owner and require the human to confirm the exact mounted calendar ID. Mounted manage requires an organizational token context and an editable discovery result.
+
+Use `account.discover_calendar_aliases`, then `account.add_calendar_alias`. Listing shows immutable identity and exact policy. Renaming changes only the human selector. Reselection changes only the mounted ID after fresh confirmation. Owner, kind, and mailbox view cannot be edited; retargeting requires idempotent removal and recreation, which creates a new resource ID. A missing mount is never silently rebound.
+
+Shared calendar read contributes `Calendars.Read.Shared`; manage contributes `Calendars.ReadWrite.Shared`. These join the account-wide OAuth scope union but do not replace target-local authorization or Exchange sharing rights.
+
 ## Local draft attachments
 
 `mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
@@ -105,6 +115,8 @@ The server requests scopes incrementally. Expanding mail access after initial co
 | Own-mail `read` only | `Mail.Read` |
 | Any draft, filing, recovery, or deletion action | `Mail.ReadWrite` |
 | Own-mail `send` | `Mail.ReadWrite`, `Mail.Send` |
+| Shared calendar `read` | `Calendars.Read.Shared` |
+| Shared mounted calendar `manage` | `Calendars.ReadWrite.Shared` |
 | Refresh tokens (always) | `offline_access` (added automatically by the identity library) |
 
 `Mail.Send` is requested only when an account's own-mail policy enables `send`.

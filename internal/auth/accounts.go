@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/desek/outlook-local-mcp/internal/resource"
 )
 
 // AccountConfig holds the identity configuration for a single account.
@@ -53,6 +55,10 @@ type AccountConfig struct {
 	// MailPolicy is the independent own-mail action policy. A nil value marks
 	// a legacy record that must be migrated before runtime registration.
 	MailPolicy *MailActionPolicy `json:"mail_policy,omitempty"`
+
+	// CalendarAliases is the account-scoped allowlist of shared calendar
+	// targets. A missing field is the secure legacy default of no aliases.
+	CalendarAliases *[]resource.CalendarAlias `json:"calendar_aliases,omitempty"`
 }
 
 // AccountsFile is the top-level structure of the persistent accounts JSON file.

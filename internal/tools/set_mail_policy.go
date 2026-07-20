@@ -53,7 +53,10 @@ func HandleSetMailPolicy(registry *auth.AccountRegistry, accountsPath string) fu
 			return mcp.NewToolResultError(fmt.Sprintf("persist account %q mail policy: %s", label, err)), nil
 		}
 
-		scopesChanged := !mailPolicyScopesEqual(entry.MailPolicy, policy)
+		calendarScopes := auth.ScopesForCalendarAliases(entry.CalendarAliases)
+		oldScopes := auth.OAuthScopeUnion(auth.ScopesForMailPolicy(entry.MailPolicy), calendarScopes)
+		newScopes := auth.OAuthScopeUnion(auth.ScopesForMailPolicy(policy), calendarScopes)
+		scopesChanged := !auth.OAuthScopeSetEqual(oldScopes, newScopes)
 		if err := registry.Update(label, func(current *auth.AccountEntry) {
 			current.MailPolicy = policy
 			current.MailProfile = auth.LegacyProfileForPolicy(policy)

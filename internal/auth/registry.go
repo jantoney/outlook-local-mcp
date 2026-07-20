@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 )
 
@@ -61,6 +62,10 @@ type AccountEntry struct {
 
 	// MailPolicy controls the exact own-mail actions available to this account.
 	MailPolicy MailActionPolicy
+
+	// CalendarAliases is the current account-scoped shared-calendar allowlist.
+	// Each entry is an immutable routing identity snapshot.
+	CalendarAliases []resource.CalendarAlias
 
 	// Scopes is the active delegated OAuth scope set used by this account's
 	// current Graph client. It is nil while the account is disconnected.

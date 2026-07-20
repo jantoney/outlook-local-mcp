@@ -1,5 +1,5 @@
-// Package resource owns immutable Outlook resource provenance, signed resource
-// references, and resolved-resource authorization values. Authentication owns
-// signed-in account selection; this package binds selected accounts to exact
-// resource and item identities without granting Graph authority by itself.
+// Package resource defines immutable shared Outlook resource identities,
+// mailbox views, target-local policies, and request resolution primitives.
+// It is deliberately independent of authentication and Graph transport so
+// persisted aliases can be validated without constructing a remote route.
 package resource

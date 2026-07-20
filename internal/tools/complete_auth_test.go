@@ -9,12 +9,14 @@ package tools
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/desek/outlook-local-mcp/internal/auth"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -22,8 +24,9 @@ import (
 // auth.AuthCodeFlow. It records calls to ExchangeCode and returns configurable
 // errors.
 type mockAuthCodeCred struct {
-	exchangeErr  error
-	exchangedURL string
+	exchangeErr     error
+	exchangedURL    string
+	exchangedScopes []string
 }
 
 // Authenticate satisfies the auth.Authenticator interface. For the auth_code
@@ -40,9 +43,39 @@ func (m *mockAuthCodeCred) AuthCodeURL(_ context.Context, _ []string) (string, e
 
 // ExchangeCode satisfies the auth.AuthCodeFlow interface. It records the
 // redirect URL and returns the configured error.
-func (m *mockAuthCodeCred) ExchangeCode(_ context.Context, redirectURL string, _ []string) error {
+func (m *mockAuthCodeCred) ExchangeCode(_ context.Context, redirectURL string, scopes []string) error {
 	m.exchangedURL = redirectURL
+	m.exchangedScopes = append([]string(nil), scopes...)
 	return m.exchangeErr
+}
+
+// TestCompleteAuth_WithAccountCalendarAliasScopes verifies account-specific
+// auth-code completion requests the shared scopes required by its aliases.
+func TestCompleteAuth_WithAccountCalendarAliasScopes(t *testing.T) {
+	id, err := resource.NewResourceID()
+	if err != nil {
+		t.Fatalf("NewResourceID() error = %v", err)
+	}
+	alias, err := resource.NewMountedCalendar(id, "team", "owner@example.com", "calendar-id", resource.CalendarProfileRead)
+	if err != nil {
+		t.Fatalf("NewMountedCalendar() error = %v", err)
+	}
+	accountMock := &mockAuthCodeCred{}
+	registry := auth.NewAccountRegistry()
+	if err := registry.Add(&auth.AccountEntry{Label: "work", Authenticator: accountMock, CalendarAliases: []resource.CalendarAlias{alias}}); err != nil {
+		t.Fatalf("registry.Add() error = %v", err)
+	}
+	handler := HandleCompleteAuth(&mockAuthCodeCred{}, "default.json", registry, []string{"Calendars.ReadWrite"})
+	result, err := handler(context.Background(), buildCallToolRequest(map[string]any{
+		"redirect_url": "https://login.microsoftonline.com/common/oauth2/nativeclient?code=acct123",
+		"account":      "work",
+	}))
+	if err != nil || result.IsError {
+		t.Fatalf("HandleCompleteAuth() result = %+v, error = %v", result, err)
+	}
+	if !slices.Contains(accountMock.exchangedScopes, "Calendars.Read.Shared") {
+		t.Fatalf("exchange scopes = %v, want Calendars.Read.Shared", accountMock.exchangedScopes)
+	}
 }
 
 // Compile-time interface compliance checks.

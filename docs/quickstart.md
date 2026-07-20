@@ -134,7 +134,20 @@ Parameters: `event_id` (required). Cancellation notices are sent to attendees au
 
 Parameters: `event_id` (required), `comment` (optional cancellation message). Only the organizer can cancel.
 
-## 5. Configuration
+## 5. Configure a shared calendar alias
+
+First ensure the owner has shared or delegated the calendar to the signed-in account in Outlook or Exchange. OAuth consent alone does not grant calendar access.
+
+For a mounted calendar, discover recipient-view candidates and have the user select the exact ID:
+
+```json
+{"tool":"account","args":{"operation":"discover_calendar_aliases","label":"work","owner":"owner@contoso.com"}}
+{"tool":"account","args":{"operation":"add_calendar_alias","label":"work","alias":"finance-calendar","owner":"owner@contoso.com","kind":"mounted_calendar","profile":"read","mounted_calendar_id":"<selected-id>","confirm_mounted_selection":true}}
+```
+
+For an organizational owner's primary calendar, create an `owner_primary_calendar` with profile `off` or `read`. Owner-primary manage is not supported. Adding a shared scope disconnects the account only when the effective scope union changes; call `account.login` when prompted.
+
+## 6. Configuration
 
 All environment variables are prefixed with `OUTLOOK_MCP_`:
 

@@ -10,6 +10,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/desek/outlook-local-mcp/internal/auth"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -28,6 +30,35 @@ type refreshMockCredential struct {
 	err     error
 	lastOpt policy.TokenRequestOptions
 	calls   int
+}
+
+// TestRefreshAccount_FallbackIncludesCalendarAliasScopes verifies a restored
+// entry without a cached scope snapshot refreshes every configured resource.
+func TestRefreshAccount_FallbackIncludesCalendarAliasScopes(t *testing.T) {
+	id, err := resource.NewResourceID()
+	if err != nil {
+		t.Fatalf("NewResourceID() error = %v", err)
+	}
+	alias, err := resource.NewMountedCalendar(id, "team", "owner@example.com", "calendar-id", resource.CalendarProfileManage)
+	if err != nil {
+		t.Fatalf("NewMountedCalendar() error = %v", err)
+	}
+	cred := &refreshMockCredential{expiry: time.Now().Add(time.Hour)}
+	registry := auth.NewAccountRegistry()
+	if err := registry.Add(&auth.AccountEntry{Label: "work", Authenticated: true, Credential: cred, CalendarAliases: []resource.CalendarAlias{alias}}); err != nil {
+		t.Fatalf("registry.Add() error = %v", err)
+	}
+
+	handler := HandleRefreshAccount(registry, addAccountTestConfig(t))
+	request := mcp.CallToolRequest{}
+	request.Params.Arguments = map[string]any{"label": "work"}
+	result, err := handler(context.Background(), request)
+	if err != nil || result.IsError {
+		t.Fatalf("HandleRefreshAccount() result = %+v, error = %v", result, err)
+	}
+	if !slices.Contains(cred.lastOpt.Scopes, "Calendars.ReadWrite.Shared") {
+		t.Fatalf("refresh scopes = %v, want Calendars.ReadWrite.Shared", cred.lastOpt.Scopes)
+	}
 }
 
 // GetToken returns the mock's preconfigured AccessToken or error. It records

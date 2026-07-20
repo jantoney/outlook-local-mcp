@@ -5,8 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/desek/outlook-local-mcp/internal/auth"
 )
 
 // TestReferenceCodecRoundTripBindsClaims verifies that a signed reference
@@ -20,7 +18,7 @@ func TestReferenceCodecRoundTripBindsClaims(t *testing.T) {
 	}
 	codec := NewReferenceCodec(key)
 	want := ReferenceClaims{
-		AccountID:    auth.AccountID("11111111-1111-4111-8111-111111111111"),
+		AccountID:    AccountID("11111111-1111-4111-8111-111111111111"),
 		ResourceID:   "resource-42",
 		ResourceKind: ResourceKindMailbox,
 		MailboxView:  MailboxViewOwner,
@@ -150,7 +148,7 @@ func TestReferenceCodecRejectsUnrelatedGraphProvenance(t *testing.T) {
 // validReferenceClaims returns fixed, independently known provenance for tests.
 func validReferenceClaims() ReferenceClaims {
 	return ReferenceClaims{
-		AccountID:    auth.AccountID("11111111-1111-4111-8111-111111111111"),
+		AccountID:    AccountID("11111111-1111-4111-8111-111111111111"),
 		ResourceID:   "resource-42",
 		ResourceKind: ResourceKindMailbox,
 		MailboxView:  MailboxViewOwner,

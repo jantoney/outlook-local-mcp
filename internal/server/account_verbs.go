@@ -253,6 +253,7 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		setMailPolicyVerb,
 		setMailProfileVerb,
 	}
+	verbs = append(verbs, buildCalendarAliasVerbs(c, wrap)...)
 
 	return verbs, registryPtr
 }

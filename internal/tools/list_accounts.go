@@ -13,6 +13,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -74,6 +75,7 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 			if entry.Client != nil {
 				auth.EnsureEmail(ctx, entry)
 			}
+			calendarAliases := append([]resource.CalendarAlias{}, entry.CalendarAliases...)
 			results = append(results, map[string]any{
 				"label":                   entry.Label,
 				"authenticated":           entry.Authenticated,
@@ -81,8 +83,12 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 				"auth_method":             entry.AuthMethod,
 				"mail_policy":             entry.MailPolicy,
 				"outlook_resource_rights": entry.MailPolicy,
-				"oauth_scopes":            auth.ScopesForMailPolicy(entry.MailPolicy),
-				"token_tenant_context":    entry.EffectiveTokenTenantContext(),
+				"calendar_aliases":        calendarAliases,
+				"oauth_scopes": auth.OAuthScopeUnion(
+					auth.ScopesForMailPolicy(entry.MailPolicy),
+					auth.ScopesForCalendarAliases(entry.CalendarAliases),
+				),
+				"token_tenant_context": entry.EffectiveTokenTenantContext(),
 			})
 		}
 

@@ -121,6 +121,11 @@ type addAccountState struct {
 	// scopesForProfile derives delegated scopes for one account profile.
 	// Tests may leave it nil to retain the fixed scopes seam.
 	scopesForProfile func(auth.MailProfile) []string
+
+	// createGraphClientForScopes builds a client with an account-wide scope
+	// union. It is used when restored shared targets contribute scopes beyond
+	// the legacy own-mail profile.
+	createGraphClientForScopes func(azcore.TokenCredential, []string) (*msgraphsdk.GraphServiceClient, error)
 }
 
 // pendingAccount holds the in-progress authentication state for a device_code
@@ -181,7 +186,19 @@ func defaultAddAccountState(scopes []string) *addAccountState {
 			return auth.NewDefaultGraphClientFactory(auth.ScopesForProfile(profile))(credential)
 		},
 		scopesForProfile: auth.ScopesForProfile,
+		createGraphClientForScopes: func(credential azcore.TokenCredential, scopes []string) (*msgraphsdk.GraphServiceClient, error) {
+			return auth.NewDefaultGraphClientFactory(scopes)(credential)
+		},
 	}
+}
+
+// graphClientWithScopes creates a Graph client for a complete account-wide
+// scope union. Tests without the new seam retain the legacy profile factory.
+func (s *addAccountState) graphClientWithScopes(credential azcore.TokenCredential, profile auth.MailProfile, scopes []string) (*msgraphsdk.GraphServiceClient, error) {
+	if s.createGraphClientForScopes != nil {
+		return s.createGraphClientForScopes(credential, scopes)
+	}
+	return s.graphClient(credential, profile)
 }
 
 // selectedScopes returns the profile-specific scope set in production and the

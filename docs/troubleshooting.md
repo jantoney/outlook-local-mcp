@@ -299,6 +299,14 @@ If `accounts.json` has a single entry whose `client_id` and `tenant_id` match th
 
 ---
 
+## Mounted calendar missing {#mounted-calendar-missing}
+
+If Graph no longer returns a configured mounted calendar ID, the server does not search by display name or silently bind the alias to another calendar. This protects mailbox-view-scoped event identifiers from being replayed against the wrong mount.
+
+**Remedy:** Call `account.discover_calendar_aliases` with the same account and owner. Have the user select the intended calendar, then call `account.reselect_calendar_alias` with the exact `mounted_calendar_id` and `confirm_mounted_selection=true`. Reselection preserves the alias's immutable resource identity; changing the owner or kind requires remove and recreate.
+
+---
+
 ## In-server documentation access
 
 The server embeds this guide and other user-facing documentation. The LLM can access it directly without leaving the session:
