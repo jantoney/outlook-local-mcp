@@ -20,6 +20,10 @@ type ResourceKind string
 const (
 	// ResourceKindMailbox identifies a shared mailbox in the owner view.
 	ResourceKindMailbox ResourceKind = "mailbox"
+	// ResourceKindOwnMailbox identifies the signed-in account's own mailbox.
+	ResourceKindOwnMailbox ResourceKind = "own_mailbox"
+	// ResourceKindOwnCalendar identifies the signed-in account's own calendar view.
+	ResourceKindOwnCalendar ResourceKind = "own_calendar"
 	// ResourceKindOwnerPrimaryCalendar identifies a resource owner's primary
 	// calendar in the owner view.
 	ResourceKindOwnerPrimaryCalendar ResourceKind = "owner_primary_calendar"
@@ -142,7 +146,7 @@ func validateResourceView(kind ResourceKind, view MailboxView) error {
 		if view != MailboxViewOwner {
 			return fmt.Errorf("resource kind %q requires owner mailbox view", kind)
 		}
-	case ResourceKindMountedCalendar:
+	case ResourceKindMountedCalendar, ResourceKindOwnMailbox, ResourceKindOwnCalendar:
 		if view != MailboxViewRecipient {
 			return fmt.Errorf("resource kind %q requires recipient mailbox view", kind)
 		}
