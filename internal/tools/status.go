@@ -107,6 +107,19 @@ type statusAccount struct {
 
 	// MailPolicy is the account's active independent own-mail action matrix.
 	MailPolicy auth.MailActionPolicy `json:"mail_policy"`
+
+	// OutlookResourceRights is the local Outlook action policy. It is named
+	// separately from OAuthScopes because Graph consent does not prove mailbox
+	// or folder-level Exchange authorization.
+	OutlookResourceRights auth.MailActionPolicy `json:"outlook_resource_rights"`
+
+	// OAuthScopes is the deterministic delegated-scope union required by the
+	// account's configured policies. It describes consent, not resource rights.
+	OAuthScopes []string `json:"oauth_scopes"`
+
+	// TokenTenantContext is the directory context proven by validated token
+	// tenant evidence, or unknown when no authoritative tenant GUID is present.
+	TokenTenantContext auth.TokenTenantContext `json:"token_tenant_context"`
 }
 
 // statusConfig contains all six configuration groups exposed by the status
@@ -285,11 +298,14 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 		accounts := make([]statusAccount, 0, len(entries))
 		for _, entry := range entries {
 			accounts = append(accounts, statusAccount{
-				Label:         entry.Label,
-				Authenticated: entry.Authenticated,
-				UPN:           entry.Email,
-				AuthMethod:    entry.AuthMethod,
-				MailPolicy:    entry.MailPolicy,
+				Label:                 entry.Label,
+				Authenticated:         entry.Authenticated,
+				UPN:                   entry.Email,
+				AuthMethod:            entry.AuthMethod,
+				MailPolicy:            entry.MailPolicy,
+				OutlookResourceRights: entry.MailPolicy,
+				OAuthScopes:           auth.ScopesForMailPolicy(entry.MailPolicy),
+				TokenTenantContext:    entry.EffectiveTokenTenantContext(),
 			})
 		}
 

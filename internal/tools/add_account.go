@@ -283,6 +283,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 				AuthMethod: p.authMethod, Credential: p.cred, Authenticator: p.authenticator,
 				Client: client, AuthRecordPath: p.authRecordPath, CacheName: p.cacheName,
 				Authenticated: true, MailProfile: p.mailProfile, MailPolicy: mailPolicy, Scopes: auth.ScopesForMailPolicy(mailPolicy),
+				TokenTenantContext: auth.TokenTenantContextFromAuthState(p.authMethod, p.authRecordPath),
 			}
 			if err := registry.Add(entry); err != nil {
 				logger.Error("account registration failed", "label", label, "error", err.Error())
@@ -363,20 +364,21 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 		// Register the account with identity metadata for persistence.
 		mailPolicy := auth.MailPolicyFromProfile(profile)
 		entry := &auth.AccountEntry{
-			AccountID:      accountID,
-			Label:          label,
-			ClientID:       clientID,
-			TenantID:       tenantID,
-			AuthMethod:     authMethod,
-			Credential:     cred,
-			Authenticator:  authenticator,
-			Client:         client,
-			AuthRecordPath: authRecordPath,
-			CacheName:      cacheName,
-			Authenticated:  true,
-			MailProfile:    profile,
-			MailPolicy:     mailPolicy,
-			Scopes:         auth.ScopesForMailPolicy(mailPolicy),
+			AccountID:          accountID,
+			Label:              label,
+			ClientID:           clientID,
+			TenantID:           tenantID,
+			AuthMethod:         authMethod,
+			Credential:         cred,
+			Authenticator:      authenticator,
+			Client:             client,
+			AuthRecordPath:     authRecordPath,
+			CacheName:          cacheName,
+			Authenticated:      true,
+			MailProfile:        profile,
+			MailPolicy:         mailPolicy,
+			Scopes:             auth.ScopesForMailPolicy(mailPolicy),
+			TokenTenantContext: auth.TokenTenantContextFromAuthState(authMethod, authRecordPath),
 		}
 
 		if err := registry.Add(entry); err != nil {

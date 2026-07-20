@@ -64,6 +64,16 @@ Legacy values remain accepted temporarily and map without granting new behavior:
 
 OAuth scopes are derived from the enabled actions. Read alone contributes `Mail.Read`; draft or any filing/deletion action contributes `Mail.ReadWrite`; send contributes `Mail.ReadWrite` and `Mail.Send`. A policy change applies locally on the next request. The account disconnects and clears local authentication only when the required scope set changes; same-scope policy edits keep the session connected. Microsoft consent is not revoked automatically.
 
+## Token tenant context and OAuth scope union
+
+Account diagnostics classify only the directory context that issued a validated token. The fixed Microsoft consumer tenant GUID `9188040d-6c67-4c5b-b112-36a304b66dad` is reported as `personal`; another validated tenant GUID is `organizational`; missing, malformed, or unavailable evidence is `unknown`. An organizational token context does not prove that the user's home identity is organizational because personal Microsoft accounts can be guests in an organization.
+
+The server never infers this context from an email address, UPN suffix, tenant display name, Graph profile, authority alias such as `common`, or an opaque account identifier. `unknown` remains explicit when validated token tenant evidence is unavailable.
+
+Each account has one deterministic, deduplicated OAuth scope union calculated from all configured policies. Policy edits take effect locally immediately. Authentication is cleared only when the effective union changes; an edit that produces the same union keeps the account connected. This minimizes consent while avoiding unnecessary sign-in prompts.
+
+`account.list` and `system.status` label `oauth_scopes` separately from `outlook_resource_rights`. OAuth scopes describe delegated consent requested from Microsoft identity. Outlook resource rights are the server's local action policy. Neither proves that Exchange grants access to a particular shared mailbox, folder, or calendar; Graph remains authoritative for resource-level access.
+
 ## Local draft attachments
 
 `mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.

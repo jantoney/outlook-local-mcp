@@ -115,20 +115,21 @@ func main() {
 			os.Exit(1)
 		}
 		if err := registry.Add(&auth.AccountEntry{
-			AccountID:      accountID,
-			Label:          "default",
-			ClientID:       cfg.ClientID,
-			TenantID:       cfg.TenantID,
-			AuthMethod:     cfg.AuthMethod,
-			Credential:     cred,
-			Authenticator:  authenticator,
-			Client:         graphClient,
-			AuthRecordPath: cfg.AuthRecordPath,
-			CacheName:      cfg.CacheName,
-			Authenticated:  true,
-			MailProfile:    auth.MailProfileFromConfig(cfg),
-			MailPolicy:     auth.MailPolicyFromProfile(auth.MailProfileFromConfig(cfg)),
-			Scopes:         append([]string(nil), scopes...),
+			AccountID:          accountID,
+			Label:              "default",
+			ClientID:           cfg.ClientID,
+			TenantID:           cfg.TenantID,
+			AuthMethod:         cfg.AuthMethod,
+			Credential:         cred,
+			Authenticator:      authenticator,
+			Client:             graphClient,
+			AuthRecordPath:     cfg.AuthRecordPath,
+			CacheName:          cfg.CacheName,
+			Authenticated:      true,
+			MailProfile:        auth.MailProfileFromConfig(cfg),
+			MailPolicy:         auth.MailPolicyFromProfile(auth.MailProfileFromConfig(cfg)),
+			Scopes:             append([]string(nil), scopes...),
+			TokenTenantContext: auth.TokenTenantContextFromAuthState(cfg.AuthMethod, cfg.AuthRecordPath),
 		}); err != nil {
 			slog.Error("default account registration failed", "error", err)
 			os.Exit(1)

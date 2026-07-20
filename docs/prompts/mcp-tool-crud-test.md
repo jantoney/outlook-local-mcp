@@ -107,7 +107,7 @@ Treat the following as a user question that you must answer using only the in-se
 **0d.** Call `{tool: "system", args: {operation: "status"}}` (default `text` mode, no `output` param).
 
 - **Verify:** The response is plain text (not JSON).
-- **Verify:** The text includes: server version, timezone, uptime, account list with auth state, and feature flags.
+- **Verify:** The text includes: server version, timezone, uptime, account list with auth state, token tenant context (`personal`, `organizational`, or `unknown`), separately labelled OAuth scopes and Outlook resource rights, and feature flags.
 - **Verify:** The full configuration details (logging paths, Graph API settings, identity config) are NOT present in the text output.
 - **Fail:** If the default response is JSON or if essential health fields are missing from the text.
 
@@ -115,7 +115,7 @@ Treat the following as a user question that you must answer using only the in-se
 
 Call `{tool: "account", args: {operation: "list"}}`.
 
-- **Verify:** The response is plain text (not JSON) listing accounts with labels and authentication state.
+- **Verify:** The response is plain text (not JSON) listing accounts with labels, authentication state, token tenant context, OAuth scope requirements, and separately labelled Outlook resource rights.
 - **Verify:** At least one account shows an authenticated status.
 - **Record:** The number of accounts and their labels for the environment report.
 - **Record:** If **two or more** accounts show authenticated status, set **multi-account mode** to `true`. Record the first authenticated account that is NOT the default as the **attendee account label**.

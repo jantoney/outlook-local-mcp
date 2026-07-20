@@ -668,15 +668,23 @@ func FormatAccountsText(accounts []map[string]any) string {
 		email, _ := a["email"].(string)
 		method, _ := a["auth_method"].(string)
 		policy, _ := a["mail_policy"].(auth.MailActionPolicy)
+		tenantContext, _ := a["token_tenant_context"].(auth.TokenTenantContext)
+		scopes, _ := a["oauth_scopes"].([]string)
+		tenantContext = auth.NormalizeTokenTenantContext(tenantContext)
+		if len(scopes) == 0 {
+			scopes = auth.ScopesForMailPolicy(policy)
+		}
 		parenthetical := state
 		if method != "" {
 			parenthetical = state + ", " + method
 		}
 		parenthetical += ", mail=" + formatMailPolicyText(policy)
+		diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s]",
+			tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(policy))
 		if email != "" {
-			fmt.Fprintf(&b, "%d. %s — %s (%s)\n", i+1, label, email, parenthetical)
+			fmt.Fprintf(&b, "%d. %s — %s (%s)%s\n", i+1, label, email, parenthetical, diagnostics)
 		} else {
-			fmt.Fprintf(&b, "%d. %s (%s)\n", i+1, label, parenthetical)
+			fmt.Fprintf(&b, "%d. %s (%s)%s\n", i+1, label, parenthetical, diagnostics)
 		}
 	}
 
@@ -756,15 +764,26 @@ func FormatStatusText(status statusResponse) string {
 			}
 			details = append(details, "mail="+formatMailPolicyText(acct.MailPolicy))
 			detailText := strings.Join(details, ", ")
+			tenantContext := auth.NormalizeTokenTenantContext(acct.TokenTenantContext)
+			scopes := acct.OAuthScopes
+			if len(scopes) == 0 {
+				scopes = auth.ScopesForMailPolicy(acct.MailPolicy)
+			}
+			rights := acct.OutlookResourceRights
+			if rights == (auth.MailActionPolicy{}) {
+				rights = acct.MailPolicy
+			}
+			diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s]",
+				tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(rights))
 			switch {
 			case acct.UPN != "" && detailText != "":
-				fmt.Fprintf(&b, "  %s: %s — %s (%s)\n", acct.Label, state, acct.UPN, detailText)
+				fmt.Fprintf(&b, "  %s: %s — %s (%s)%s\n", acct.Label, state, acct.UPN, detailText, diagnostics)
 			case acct.UPN != "":
-				fmt.Fprintf(&b, "  %s: %s — %s\n", acct.Label, state, acct.UPN)
+				fmt.Fprintf(&b, "  %s: %s — %s%s\n", acct.Label, state, acct.UPN, diagnostics)
 			case detailText != "":
-				fmt.Fprintf(&b, "  %s: %s (%s)\n", acct.Label, state, detailText)
+				fmt.Fprintf(&b, "  %s: %s (%s)%s\n", acct.Label, state, detailText, diagnostics)
 			default:
-				fmt.Fprintf(&b, "  %s: %s\n", acct.Label, state)
+				fmt.Fprintf(&b, "  %s: %s%s\n", acct.Label, state, diagnostics)
 			}
 		}
 	}

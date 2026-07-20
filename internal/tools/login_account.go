@@ -191,6 +191,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			e.MailProfile = profile
 			e.MailPolicy = mailPolicy
 			e.Scopes = append([]string(nil), scopes...)
+			e.TokenTenantContext = auth.TokenTenantContextFromAuthState(authMethod, authRecordPath)
 			e.Email = ""
 		}); err != nil {
 			logger.Error("registry update failed", "label", label, "error", err.Error())

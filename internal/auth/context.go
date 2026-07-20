@@ -126,6 +126,10 @@ type AccountInfo struct {
 	// Scopes is the selected account's active delegated OAuth scope set.
 	Scopes []string
 
+	// TokenTenantContext is the directory context established by validated
+	// token tenant evidence. Unknown means no authoritative GUID was available.
+	TokenTenantContext TokenTenantContext
+
 	// Advisory is an optional human-readable note produced during account
 	// resolution — for example, when the resolver auto-selects the sole
 	// authenticated account while disconnected siblings also exist. Downstream

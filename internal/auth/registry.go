@@ -45,6 +45,11 @@ type AccountEntry struct {
 	// server restart.
 	TenantID string
 
+	// TokenTenantContext is the classified directory context from validated
+	// token tenant evidence. It is never inferred from TenantID authority
+	// aliases, Email, Graph profile data, or opaque account identifiers.
+	TokenTenantContext TokenTenantContext
+
 	// AuthMethod is the authentication method used for this account
 	// (e.g., "auth_code", "browser", "device_code"). Stored for persistence
 	// so the account can be reconstructed after a server restart.
@@ -95,6 +100,21 @@ type AccountEntry struct {
 	emailMu sync.Mutex
 }
 
+// EffectiveTokenTenantContext returns the account's validated token tenant
+// context. It prefers current runtime evidence and otherwise re-reads the local
+// authentication state so a token validated after registry construction is
+// reflected without inferring from identity presentation fields.
+func (e *AccountEntry) EffectiveTokenTenantContext() TokenTenantContext {
+	if e == nil {
+		return TokenTenantUnknown
+	}
+	context := NormalizeTokenTenantContext(e.TokenTenantContext)
+	if context != TokenTenantUnknown {
+		return context
+	}
+	return TokenTenantContextFromAuthState(e.AuthMethod, e.AuthRecordPath)
+}
+
 // AccountRegistry is a thread-safe store for multiple authenticated accounts.
 // It uses a sync.RWMutex to allow concurrent reads while serializing writes.
 type AccountRegistry struct {
@@ -128,6 +148,7 @@ func (r *AccountRegistry) Add(entry *AccountEntry) error {
 	if !labelPattern.MatchString(entry.Label) {
 		return fmt.Errorf("invalid account label %q: must match %s", entry.Label, labelPattern.String())
 	}
+	entry.TokenTenantContext = NormalizeTokenTenantContext(entry.TokenTenantContext)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

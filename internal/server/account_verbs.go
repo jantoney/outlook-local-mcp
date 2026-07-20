@@ -124,12 +124,12 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 
 	listVerb := tools.Verb{
 		Name:        "list",
-		Summary:     "list all registered accounts with label, UPN, state, and auth_method",
-		Description: "Lists all accounts in the registry with their label, UPN (once authenticated), connection state (connected, disconnected), and the auth method used. Always call this before using calendar or mail verbs to confirm the correct account is connected.",
+		Summary:     "list accounts with identity, policy rights, and OAuth scope requirements",
+		Description: "Lists all accounts with label, UPN, connection state, auth method, validated token tenant context, deterministic OAuth scope union, and local Outlook resource rights. OAuth scopes describe delegated consent and do not prove Exchange mailbox or folder authorization. Always call this before using calendar or mail verbs to confirm the correct account is connected.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"output": "summary"}, Comment: "get a compact JSON list of accounts"},
 		},
-		SeeDocs: []string{"concepts#multi-account-model-and-upn-identity"},
+		SeeDocs: []string{"concepts#multi-account-model-and-upn-identity", "concepts#token-tenant-context-and-oauth-scope-union"},
 		Handler: wrap("account.list", "read", tools.HandleListAccounts(c.registry)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
@@ -227,8 +227,8 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 	setMailPolicyVerb := tools.Verb{
 		Name:        "set_mail_policy",
 		Summary:     "change exact own-mail actions for one account",
-		Description: "Partially updates one account's independent own-mail actions. Omitted switches stay unchanged. Policy changes apply immediately; the account disconnects and clears local authentication only when its required OAuth scopes change. OAuth consent is not target authorization and is not revoked automatically.",
-		SeeDocs:     []string{"concepts#independent-mail-action-policies", "troubleshooting#revoke-microsoft-app-consent"},
+		Description: "Partially updates one account's independent own-mail actions. Omitted switches stay unchanged. The server recalculates the account-wide deterministic OAuth scope union and disconnects only when that union changes. Local policy remains authoritative: OAuth consent does not grant a disabled action or prove Exchange target authorization, and consent is not revoked automatically.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#token-tenant-context-and-oauth-scope-union", "troubleshooting#revoke-microsoft-app-consent"},
 		Handler: wrap("account.set_mail_policy", "write", ReadOnlyGuard(
 			"account.set_mail_policy", c.cfg.ReadOnly, tools.HandleSetMailPolicy(c.registry, c.cfg.AccountsPath))),
 		Annotations: []mcp.ToolOption{

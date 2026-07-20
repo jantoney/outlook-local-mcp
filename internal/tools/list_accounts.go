@@ -75,11 +75,14 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 				auth.EnsureEmail(ctx, entry)
 			}
 			results = append(results, map[string]any{
-				"label":         entry.Label,
-				"authenticated": entry.Authenticated,
-				"email":         entry.Email,
-				"auth_method":   entry.AuthMethod,
-				"mail_policy":   entry.MailPolicy,
+				"label":                   entry.Label,
+				"authenticated":           entry.Authenticated,
+				"email":                   entry.Email,
+				"auth_method":             entry.AuthMethod,
+				"mail_policy":             entry.MailPolicy,
+				"outlook_resource_rights": entry.MailPolicy,
+				"oauth_scopes":            auth.ScopesForMailPolicy(entry.MailPolicy),
+				"token_tenant_context":    entry.EffectiveTokenTenantContext(),
 			})
 		}
 

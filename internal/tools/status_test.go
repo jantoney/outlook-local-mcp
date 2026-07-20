@@ -81,7 +81,10 @@ func callStatus(t *testing.T, cfg config.Config, registry *auth.AccountRegistry,
 // object containing version, timezone, accounts array, and uptime.
 func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	registry := auth.NewAccountRegistry()
-	_ = registry.Add(&auth.AccountEntry{Label: "default", Authenticated: true, MailPolicy: auth.MailActionPolicy{Read: true}})
+	_ = registry.Add(&auth.AccountEntry{
+		Label: "default", Authenticated: true, MailPolicy: auth.MailActionPolicy{Read: true},
+		TokenTenantContext: auth.TokenTenantPersonal,
+	})
 	_ = registry.Add(&auth.AccountEntry{Label: "work", Authenticated: false})
 
 	cfg := testConfig()
@@ -102,6 +105,15 @@ func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	policy, ok := defaultAccount["mail_policy"].(map[string]any)
 	if !ok || policy["read"] != true || policy["permanent_delete"] != false {
 		t.Fatalf("default account policy = %v, want read-only secure matrix", defaultAccount["mail_policy"])
+	}
+	if defaultAccount["token_tenant_context"] != "personal" {
+		t.Fatalf("token_tenant_context = %v, want personal", defaultAccount["token_tenant_context"])
+	}
+	if _, ok := defaultAccount["oauth_scopes"].([]any); !ok {
+		t.Fatalf("oauth_scopes = %T, want JSON array", defaultAccount["oauth_scopes"])
+	}
+	if _, ok := defaultAccount["outlook_resource_rights"].(map[string]any); !ok {
+		t.Fatalf("outlook_resource_rights = %T, want separate policy object", defaultAccount["outlook_resource_rights"])
 	}
 
 	// Uptime should be approximately 3600 seconds (1 hour).

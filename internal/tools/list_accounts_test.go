@@ -65,9 +65,11 @@ func TestHandleListAccounts_WithAccounts(t *testing.T) {
 	client, srv := newTestGraphClient(t, nil)
 	defer srv.Close()
 	if err := registry.Add(&auth.AccountEntry{
-		Label:         "default",
-		Client:        client,
-		Authenticated: true,
+		Label:              "default",
+		Client:             client,
+		Authenticated:      true,
+		MailPolicy:         auth.MailActionPolicy{Read: true},
+		TokenTenantContext: auth.TokenTenantOrganizational,
 	}); err != nil {
 		t.Fatalf("registry.Add(default) error: %v", err)
 	}
@@ -107,6 +109,15 @@ func TestHandleListAccounts_WithAccounts(t *testing.T) {
 	policy, ok := accounts[0]["mail_policy"].(map[string]any)
 	if !ok || policy["permanent_delete"] != false {
 		t.Fatalf("default mail_policy = %v, want secure action matrix", accounts[0]["mail_policy"])
+	}
+	if accounts[0]["token_tenant_context"] != "organizational" {
+		t.Fatalf("token_tenant_context = %v, want organizational", accounts[0]["token_tenant_context"])
+	}
+	if _, ok := accounts[0]["oauth_scopes"].([]any); !ok {
+		t.Fatalf("oauth_scopes = %T, want JSON array", accounts[0]["oauth_scopes"])
+	}
+	if _, ok := accounts[0]["outlook_resource_rights"].(map[string]any); !ok {
+		t.Fatalf("outlook_resource_rights = %T, want separate policy object", accounts[0]["outlook_resource_rights"])
 	}
 	if accounts[1]["label"] != "work" {
 		t.Errorf("second account label = %q, want %q", accounts[1]["label"], "work")

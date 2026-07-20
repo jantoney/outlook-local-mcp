@@ -85,8 +85,8 @@ func buildSystemVerbs(c systemVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 	statusVerb := tools.Verb{
 		Name:        "status",
 		Summary:     "return server health: version, accounts, uptime, config (no Graph call)",
-		Description: "Returns the server's current health state: binary version, registered accounts with their connection state, server uptime, active configuration flags (ReadOnly, MailEnabled, MailManageEnabled, AuthMethod), and the embedded documentation base URI. No Microsoft Graph call is made; this verb is safe to call without authentication.",
-		SeeDocs:     []string{"concepts#in-server-documentation-surface"},
+		Description: "Returns the server's current health state: binary version, registered accounts with connection state, validated token tenant context, OAuth scope requirements, separately labelled local Outlook rights, server uptime, active configuration flags, and the embedded documentation base URI. OAuth scopes describe consent and do not prove Exchange resource authorization. No Microsoft Graph call is made.",
+		SeeDocs:     []string{"concepts#token-tenant-context-and-oauth-scope-union", "concepts#in-server-documentation-surface"},
 		Handler:     tools.Handler(statusHandler),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),

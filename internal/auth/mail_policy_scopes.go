@@ -6,14 +6,14 @@ package auth
 func ScopesForMailPolicy(policy MailActionPolicy) []string {
 	scopes := []string{userReadScope, calendarScope}
 	if policy.Send {
-		return append(scopes, mailReadWriteScope, mailSendScope)
+		return OAuthScopeUnion(scopes, []string{mailReadWriteScope, mailSendScope})
 	}
 	if policy.Draft || policy.Move || policy.Archive || policy.Trash ||
 		policy.Restore || policy.PermanentDelete {
-		return append(scopes, mailReadWriteScope)
+		return OAuthScopeUnion(scopes, []string{mailReadWriteScope})
 	}
 	if policy.Read {
-		return append(scopes, mailScope)
+		return OAuthScopeUnion(scopes, []string{mailScope})
 	}
-	return scopes
+	return OAuthScopeUnion(scopes)
 }

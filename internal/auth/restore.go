@@ -262,18 +262,19 @@ func restoreOne(
 	}
 
 	entry := &AccountEntry{
-		AccountID:      acct.AccountID,
-		Label:          acct.Label,
-		ClientID:       acct.ClientID,
-		TenantID:       acct.TenantID,
-		AuthMethod:     acct.AuthMethod,
-		Credential:     cred,
-		Authenticator:  authenticator,
-		AuthRecordPath: authRecordPath,
-		CacheName:      cacheName,
-		MailProfile:    profile,
-		MailPolicy:     MailPolicyFromProfile(profile),
-		Scopes:         append([]string(nil), scopes...),
+		AccountID:          acct.AccountID,
+		Label:              acct.Label,
+		ClientID:           acct.ClientID,
+		TenantID:           acct.TenantID,
+		AuthMethod:         acct.AuthMethod,
+		Credential:         cred,
+		Authenticator:      authenticator,
+		AuthRecordPath:     authRecordPath,
+		CacheName:          cacheName,
+		MailProfile:        profile,
+		MailPolicy:         MailPolicyFromProfile(profile),
+		Scopes:             append([]string(nil), scopes...),
+		TokenTenantContext: TokenTenantContextFromAuthState(acct.AuthMethod, authRecordPath),
 	}
 	if acct.MailPolicy != nil {
 		entry.MailPolicy = *acct.MailPolicy
