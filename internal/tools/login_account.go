@@ -115,7 +115,12 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		mailPolicy := loginMailPolicy(entry, cfg)
 		profile := auth.LegacyProfileForPolicy(mailPolicy)
 		calendarAliases := loginCalendarAliases(entry, cfg)
-		scopes := auth.OAuthScopeUnion(s.selectedScopes(profile), auth.ScopesForCalendarAliases(calendarAliases))
+		mailAliases := loginMailAliases(entry, cfg)
+		scopes := auth.OAuthScopeUnion(
+			s.selectedScopes(profile),
+			auth.ScopesForCalendarAliases(calendarAliases),
+			auth.ScopesForMailAliases(mailAliases),
+		)
 
 		clientID := entry.ClientID
 		if clientID == "" {
@@ -195,6 +200,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			e.Scopes = append([]string(nil), scopes...)
 			e.TokenTenantContext = auth.TokenTenantContextFromAuthState(authMethod, authRecordPath)
 			e.CalendarAliases = append([]resource.CalendarAlias(nil), calendarAliases...)
+			e.MailAliases = append([]resource.MailAlias(nil), mailAliases...)
 			e.Email = ""
 		}); err != nil {
 			logger.Error("registry update failed", "label", label, "error", err.Error())
@@ -242,6 +248,17 @@ func loginCalendarAliases(entry *auth.AccountEntry, cfg config.Config) []resourc
 		return aliases
 	}
 	return append([]resource.CalendarAlias(nil), entry.CalendarAliases...)
+}
+
+// loginMailAliases returns the authoritative persisted shared-mail allowlist,
+// falling back to the disconnected runtime snapshot only when persistence is
+// unavailable. The returned slice is newly allocated.
+func loginMailAliases(entry *auth.AccountEntry, cfg config.Config) []resource.MailAlias {
+	aliases, err := auth.AccountMailAliases(cfg.AccountsPath, entry.Label)
+	if err == nil {
+		return aliases
+	}
+	return append([]resource.MailAlias(nil), entry.MailAliases...)
 }
 
 // loginMailPolicy returns the authoritative persisted independent policy. It

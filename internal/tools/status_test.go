@@ -9,6 +9,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/config"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/tools"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -81,9 +82,18 @@ func callStatus(t *testing.T, cfg config.Config, registry *auth.AccountRegistry,
 // object containing version, timezone, accounts array, and uptime.
 func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	registry := auth.NewAccountRegistry()
+	resourceID, err := resource.NewResourceID()
+	if err != nil {
+		t.Fatalf("NewResourceID() error = %v", err)
+	}
+	mailAlias, err := resource.NewMailAlias(resourceID, "finance", "finance@example.com")
+	if err != nil {
+		t.Fatalf("NewMailAlias() error = %v", err)
+	}
+	mailAlias.Policy = auth.MailActionPolicy{Read: true}
 	_ = registry.Add(&auth.AccountEntry{
 		Label: "default", Authenticated: true, MailPolicy: auth.MailActionPolicy{Read: true},
-		TokenTenantContext: auth.TokenTenantPersonal,
+		TokenTenantContext: auth.TokenTenantPersonal, MailAliases: []resource.MailAlias{mailAlias},
 	})
 	_ = registry.Add(&auth.AccountEntry{Label: "work", Authenticated: false})
 
@@ -114,6 +124,10 @@ func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	}
 	if _, ok := defaultAccount["outlook_resource_rights"].(map[string]any); !ok {
 		t.Fatalf("outlook_resource_rights = %T, want separate policy object", defaultAccount["outlook_resource_rights"])
+	}
+	mailAliases, ok := defaultAccount["mail_aliases"].([]any)
+	if !ok || len(mailAliases) != 1 || mailAliases[0].(map[string]any)["policy"].(map[string]any)["read"] != true {
+		t.Fatalf("mail_aliases = %v, want exact read-only target", defaultAccount["mail_aliases"])
 	}
 
 	// Uptime should be approximately 3600 seconds (1 hour).

@@ -672,6 +672,7 @@ func FormatAccountsText(accounts []map[string]any) string {
 		tenantContext, _ := a["token_tenant_context"].(auth.TokenTenantContext)
 		scopes, _ := a["oauth_scopes"].([]string)
 		calendarAliases, _ := a["calendar_aliases"].([]resource.CalendarAlias)
+		mailAliases, _ := a["mail_aliases"].([]resource.MailAlias)
 		tenantContext = auth.NormalizeTokenTenantContext(tenantContext)
 		if len(scopes) == 0 {
 			scopes = auth.ScopesForMailPolicy(policy)
@@ -681,12 +682,15 @@ func FormatAccountsText(accounts []map[string]any) string {
 			parenthetical = state + ", " + method
 		}
 		parenthetical += ", mail=" + formatMailPolicyText(policy)
-		diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s; calendar-aliases=%d]",
-			tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(policy), len(calendarAliases))
+		diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s; calendar-aliases=%d; mail-aliases=%d]",
+			tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(policy), len(calendarAliases), len(mailAliases))
 		if email != "" {
 			fmt.Fprintf(&b, "%d. %s — %s (%s)%s\n", i+1, label, email, parenthetical, diagnostics)
 		} else {
 			fmt.Fprintf(&b, "%d. %s (%s)%s\n", i+1, label, parenthetical, diagnostics)
+		}
+		for _, alias := range mailAliases {
+			fmt.Fprintf(&b, "   Mail alias %s (%s, %s): %s\n", alias.Alias, alias.Owner, alias.ResourceID, formatMailPolicyText(alias.Policy))
 		}
 	}
 
@@ -775,8 +779,8 @@ func FormatStatusText(status statusResponse) string {
 			if rights == (auth.MailActionPolicy{}) {
 				rights = acct.MailPolicy
 			}
-			diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s; calendar-aliases=%d]",
-				tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(rights), len(acct.CalendarAliases))
+			diagnostics := fmt.Sprintf(" [tenant-context=%s; oauth-scopes=%s; outlook-rights=%s; calendar-aliases=%d; mail-aliases=%d]",
+				tenantContext, strings.Join(scopes, "+"), formatMailPolicyText(rights), len(acct.CalendarAliases), len(acct.MailAliases))
 			switch {
 			case acct.UPN != "" && detailText != "":
 				fmt.Fprintf(&b, "  %s: %s — %s (%s)%s\n", acct.Label, state, acct.UPN, detailText, diagnostics)
@@ -786,6 +790,9 @@ func FormatStatusText(status statusResponse) string {
 				fmt.Fprintf(&b, "  %s: %s (%s)%s\n", acct.Label, state, detailText, diagnostics)
 			default:
 				fmt.Fprintf(&b, "  %s: %s%s\n", acct.Label, state, diagnostics)
+			}
+			for _, alias := range acct.MailAliases {
+				fmt.Fprintf(&b, "    Mail alias %s (%s, %s): %s\n", alias.Alias, alias.Owner, alias.ResourceID, formatMailPolicyText(alias.Policy))
 			}
 		}
 	}

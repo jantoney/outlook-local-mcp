@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 )
@@ -60,6 +61,15 @@ func TestHandleListAccounts_EmptyRegistry(t *testing.T) {
 // all registered accounts sorted alphabetically by label.
 func TestHandleListAccounts_WithAccounts(t *testing.T) {
 	registry := auth.NewAccountRegistry()
+	resourceID, err := resource.NewResourceID()
+	if err != nil {
+		t.Fatalf("NewResourceID() error = %v", err)
+	}
+	mailAlias, err := resource.NewMailAlias(resourceID, "finance", "finance@example.com")
+	if err != nil {
+		t.Fatalf("NewMailAlias() error = %v", err)
+	}
+	mailAlias.Policy = auth.MailActionPolicy{Archive: true}
 
 	// Add a "default" account with a client (authenticated).
 	client, srv := newTestGraphClient(t, nil)
@@ -69,6 +79,7 @@ func TestHandleListAccounts_WithAccounts(t *testing.T) {
 		Client:             client,
 		Authenticated:      true,
 		MailPolicy:         auth.MailActionPolicy{Read: true},
+		MailAliases:        []resource.MailAlias{mailAlias},
 		TokenTenantContext: auth.TokenTenantOrganizational,
 	}); err != nil {
 		t.Fatalf("registry.Add(default) error: %v", err)
@@ -112,6 +123,10 @@ func TestHandleListAccounts_WithAccounts(t *testing.T) {
 	}
 	if accounts[0]["token_tenant_context"] != "organizational" {
 		t.Fatalf("token_tenant_context = %v, want organizational", accounts[0]["token_tenant_context"])
+	}
+	mailAliases, ok := accounts[0]["mail_aliases"].([]any)
+	if !ok || len(mailAliases) != 1 || mailAliases[0].(map[string]any)["policy"].(map[string]any)["archive"] != true {
+		t.Fatalf("mail_aliases = %v, want exact archive-only target", accounts[0]["mail_aliases"])
 	}
 	if _, ok := accounts[0]["oauth_scopes"].([]any); !ok {
 		t.Fatalf("oauth_scopes = %T, want JSON array", accounts[0]["oauth_scopes"])

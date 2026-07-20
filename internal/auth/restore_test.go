@@ -11,8 +11,50 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 )
+
+// TestRestoreAccountsByProfileRestoresMailAliasesAndScopes verifies startup
+// keeps the exact shared target policy and derives its shared OAuth scopes.
+func TestRestoreAccountsByProfileRestoresMailAliasesAndScopes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	id, err := resource.NewResourceID()
+	if err != nil {
+		t.Fatalf("NewResourceID() error = %v", err)
+	}
+	alias, err := resource.NewMailAlias(id, "finance", "finance@example.com")
+	if err != nil {
+		t.Fatalf("NewMailAlias() error = %v", err)
+	}
+	alias.Policy = MailActionPolicy{Send: true}
+	aliases := []resource.MailAlias{alias}
+	policy := MailActionPolicy{}
+	if err := SaveAccounts(path, []AccountConfig{{
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "device_code",
+		MailPolicy: &policy, MailAliases: &aliases,
+	}}); err != nil {
+		t.Fatalf("SaveAccounts() error = %v", err)
+	}
+	registry := NewAccountRegistry()
+	RestoreAccountsByProfile(path, "cache", dir, registry, fakeCredentialFactory, MailProfileCalendarOnly, "")
+	entry, ok := registry.Get("work")
+	if !ok || len(entry.MailAliases) != 1 || entry.MailAliases[0] != alias {
+		t.Fatalf("restored entry = %+v", entry)
+	}
+	want := map[string]bool{"Mail.ReadWrite.Shared": false, "Mail.Send.Shared": false}
+	for _, scope := range entry.Scopes {
+		if _, exists := want[scope]; exists {
+			want[scope] = true
+		}
+	}
+	for scope, found := range want {
+		if !found {
+			t.Fatalf("restored scopes = %v, missing %s", entry.Scopes, scope)
+		}
+	}
+}
 
 // mockCredential implements azcore.TokenCredential for testing. GetToken
 // always returns an error, simulating the absence of cached tokens. This

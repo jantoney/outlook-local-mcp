@@ -147,7 +147,18 @@ For a mounted calendar, discover recipient-view candidates and have the user sel
 
 For an organizational owner's primary calendar, create an `owner_primary_calendar` with profile `off` or `read`. Owner-primary manage is not supported. Adding a shared scope disconnects the account only when the effective scope union changes; call `account.login` when prompted.
 
-## 6. Configuration
+## 6. Configure a shared mailbox alias
+
+Shared mailboxes require a validated organizational token context and existing Exchange delegation. Add the immutable owner-view identity first; every action starts disabled:
+
+```json
+{"tool":"account","args":{"operation":"add_mail_alias","label":"work","alias":"finance-mail","owner":"finance@contoso.com"}}
+{"tool":"account","args":{"operation":"set_mail_alias_policy","label":"work","alias":"finance-mail","read":true,"archive":true}}
+```
+
+Call `account.list_mail_aliases` to review the exact target policy and compatibility. Enabling shared send additionally requires Exchange Send As or Send on Behalf rights and the separate confirmed-draft workflow.
+
+## 7. Configuration
 
 All environment variables are prefixed with `OUTLOOK_MCP_`:
 

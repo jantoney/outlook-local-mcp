@@ -76,6 +76,7 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 				auth.EnsureEmail(ctx, entry)
 			}
 			calendarAliases := append([]resource.CalendarAlias{}, entry.CalendarAliases...)
+			mailAliases := append([]resource.MailAlias{}, entry.MailAliases...)
 			results = append(results, map[string]any{
 				"label":                   entry.Label,
 				"authenticated":           entry.Authenticated,
@@ -84,11 +85,9 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 				"mail_policy":             entry.MailPolicy,
 				"outlook_resource_rights": entry.MailPolicy,
 				"calendar_aliases":        calendarAliases,
-				"oauth_scopes": auth.OAuthScopeUnion(
-					auth.ScopesForMailPolicy(entry.MailPolicy),
-					auth.ScopesForCalendarAliases(entry.CalendarAliases),
-				),
-				"token_tenant_context": entry.EffectiveTokenTenantContext(),
+				"mail_aliases":            mailAliases,
+				"oauth_scopes":            auth.ScopesForAccountEntry(entry),
+				"token_tenant_context":    entry.EffectiveTokenTenantContext(),
 			})
 		}
 

@@ -105,6 +105,7 @@ func HandleCompleteAuth(cred auth.Authenticator, authRecordPath string, registry
 				targetScopes = auth.OAuthScopeUnion(
 					auth.ScopesForMailPolicy(mailPolicy),
 					auth.ScopesForCalendarAliases(entry.CalendarAliases),
+					auth.ScopesForMailAliases(entry.MailAliases),
 				)
 			}
 			logger = logger.With("account", accountLabel)

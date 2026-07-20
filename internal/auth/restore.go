@@ -188,7 +188,11 @@ func restoreAccounts(
 			policy = *acct.MailPolicy
 		}
 		profile := LegacyProfileForPolicy(policy)
-		accountScopes := OAuthScopeUnion(scopesForProfile(profile), calendarAliasesFromConfig(acct))
+		accountScopes := OAuthScopeUnion(
+			scopesForProfile(profile),
+			calendarAliasesFromConfig(acct),
+			mailAliasesFromConfig(acct),
+		)
 		if restoreOne(acct, cacheNameBase, authRecordDir, registry, credFactory,
 			clientFactoryForScopes(accountScopes), accountScopes, profile, tokenStorage) {
 			restored++
@@ -207,6 +211,15 @@ func calendarAliasesFromConfig(account AccountConfig) []string {
 		return nil
 	}
 	return ScopesForCalendarAliases(*account.CalendarAliases)
+}
+
+// mailAliasesFromConfig returns the shared-mail scope contribution of one
+// persisted account without exposing its pointer-backed compatibility form.
+func mailAliasesFromConfig(account AccountConfig) []string {
+	if account.MailAliases == nil {
+		return nil
+	}
+	return ScopesForMailAliases(*account.MailAliases)
 }
 
 // restoreOne restores a single account from its persisted configuration.
@@ -290,6 +303,9 @@ func restoreOne(
 	}
 	if acct.CalendarAliases != nil {
 		entry.CalendarAliases = append([]resource.CalendarAlias(nil), (*acct.CalendarAliases)...)
+	}
+	if acct.MailAliases != nil {
+		entry.MailAliases = append([]resource.MailAlias(nil), (*acct.MailAliases)...)
 	}
 	if acct.MailPolicy != nil {
 		entry.MailPolicy = *acct.MailPolicy

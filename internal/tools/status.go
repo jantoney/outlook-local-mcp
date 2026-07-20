@@ -124,6 +124,10 @@ type statusAccount struct {
 
 	// CalendarAliases is the complete account-scoped shared-calendar allowlist.
 	CalendarAliases []resource.CalendarAlias `json:"calendar_aliases"`
+
+	// MailAliases is the separate shared-mail allowlist with exact target-local
+	// action policies and immutable owner-view routing identity.
+	MailAliases []resource.MailAlias `json:"mail_aliases"`
 }
 
 // statusConfig contains all six configuration groups exposed by the status
@@ -308,12 +312,10 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 				AuthMethod:            entry.AuthMethod,
 				MailPolicy:            entry.MailPolicy,
 				OutlookResourceRights: entry.MailPolicy,
-				OAuthScopes: auth.OAuthScopeUnion(
-					auth.ScopesForMailPolicy(entry.MailPolicy),
-					auth.ScopesForCalendarAliases(entry.CalendarAliases),
-				),
-				TokenTenantContext: entry.EffectiveTokenTenantContext(),
-				CalendarAliases:    append([]resource.CalendarAlias{}, entry.CalendarAliases...),
+				OAuthScopes:           auth.ScopesForAccountEntry(entry),
+				TokenTenantContext:    entry.EffectiveTokenTenantContext(),
+				CalendarAliases:       append([]resource.CalendarAlias{}, entry.CalendarAliases...),
+				MailAliases:           append([]resource.MailAlias{}, entry.MailAliases...),
 			})
 		}
 

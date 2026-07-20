@@ -539,6 +539,16 @@ To verify AC-5 manually:
 8. When read-only mode is enabled, **verify** add, rename, remove, profile, and reselection mutations are rejected before persistence or Graph traffic.
 9. If a genuinely shared mounted calendar is available, call `discover_calendar_aliases`; have the user select one returned ID; add it only with `confirm_mounted_selection: true`. **Fail:** if creation accepts an unconfirmed ID, an ID owned by another resource, or silently chooses a candidate.
 
+### Step 29e -- Shared-mail alias lifecycle and action policy
+
+1. Inspect the selected account's `token_tenant_context`. If it is not `organizational`, attempt `add_mail_alias` with a unique test selector. **Pass:** the operation is rejected locally as incompatible and no alias is persisted; then record the remaining shared-mail lifecycle as **SKIP**.
+2. For an organizational account, add a unique shared-mail alias using a mailbox owner for which Exchange delegation is already configured. **Verify:** the result includes a new immutable `resource_id`, kind `mailbox`, view `owner`, organizational compatibility, and all eight actions disabled.
+3. Call `list_mail_aliases` in text and summary modes. **Pass:** both expose the exact target policy independently from the account's own-mail policy.
+4. Enable only `archive` with `set_mail_alias_policy`. **Pass:** no other action becomes enabled. If another target already retains the same shared scope, the account remains connected; otherwise it disconnects and requires `account.login`.
+5. Rename the alias and verify its resource ID, owner, kind, view, and policy are unchanged.
+6. Remove the alias twice, recreate the same selector, and verify the recreated `resource_id` differs. Remove it as cleanup.
+7. **Fail:** if a personal or unknown context accepts shared-mail configuration, a retained OAuth scope authorizes a disabled action, own-mail policy constrains the alias policy, or read-only mode allows a mutation before persistence.
+
 ### Step 30 -- Mail operations (skip if selected account has read disabled)
 
 Use the selected account's `mail_policy` from Step 1. If `read` is false, **skip** read-dependent Steps 30 through 36b and record them as SKIP.

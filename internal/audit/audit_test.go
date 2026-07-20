@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -384,6 +385,36 @@ func TestAuditWrapCapturesAccountPolicyCapabilityAndResource(t *testing.T) {
 	}
 	if entry.Account != "personal" || entry.MailPolicy != policy || entry.MailCapability != "send" || entry.ResourceID != "draft-1" {
 		t.Fatalf("audit identity = account %q policy %+v capability %q resource %q", entry.Account, entry.MailPolicy, entry.MailCapability, entry.ResourceID)
+	}
+}
+
+// TestAuditWrapCapturesSharedMailTarget verifies handlers can publish the exact
+// alias-local policy and compatibility to outer audit middleware.
+func TestAuditWrapCapturesSharedMailTarget(t *testing.T) {
+	var buf bytes.Buffer
+	setAuditState(t, true, &buf)
+	policy := auth.MailActionPolicy{Read: true, Archive: true}
+	handler := func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		auth.RecordAuditTarget(ctx, auth.AuditTarget{
+			Alias: "finance", ResourceID: "resource-1",
+			ResourceKind: resource.ResourceKindMailbox,
+			MailboxView:  resource.MailboxViewOwner,
+			MailPolicy:   policy, Compatibility: "compatible",
+		})
+		return mcp.NewToolResultText("ok"), nil
+	}
+	request := mcp.CallToolRequest{}
+	request.Params.Arguments = map[string]any{"label": "work", "alias": "finance"}
+	_, _ = AuditWrap("account.set_mail_alias_policy", "write", handler)(context.Background(), request)
+	var entry AuditEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Account != "work" || entry.TargetAlias != "finance" ||
+		entry.ResourceID != "resource-1" || entry.TargetKind != "mailbox" ||
+		entry.TargetView != "owner" || entry.MailPolicy != policy ||
+		entry.TargetCompatibility != "compatible" {
+		t.Fatalf("shared target audit = %+v", entry)
 	}
 }
 

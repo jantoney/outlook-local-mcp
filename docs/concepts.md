@@ -84,6 +84,14 @@ Use `account.discover_calendar_aliases`, then `account.add_calendar_alias`. List
 
 Shared calendar read contributes `Calendars.Read.Shared`; manage contributes `Calendars.ReadWrite.Shared`. These join the account-wide OAuth scope union but do not replace target-local authorization or Exchange sharing rights.
 
+## Shared mail aliases
+
+A shared-mail alias is a separate account-scoped allowlist entry for one owner-view mailbox routed through `/users/{owner}/...`. It has an immutable resource ID, owner, `mailbox` kind, and `owner` mailbox view. Renaming changes only the human selector and preserves identity. Retargeting requires idempotent removal and recreation, which creates a new identity and invalidates old target-bound references. A calendar and mail alias may use the same selector and owner without becoming the same resource.
+
+New aliases start with all eight actions disabled: `read`, `draft`, `move`, `archive`, `trash`, `restore`, `permanent_delete`, and `send`. Use `account.set_mail_alias_policy` to change only explicitly supplied switches. Each alias policy is independent of the signed-in account's own-mail policy and every other alias. Personal and unknown token contexts reject shared-mail configuration and use locally; only validated organizational contexts are compatible. Exchange mailbox, folder, and Send As or Send on Behalf delegation remains authoritative.
+
+Shared read contributes `Mail.Read.Shared`. Draft, filing, recovery, deletion, or send contributes `Mail.ReadWrite.Shared`; send also contributes `Mail.Send.Shared`. The server disconnects the account only when changing an alias alters the complete account-wide scope union. OAuth consent never authorizes an action disabled by the selected alias policy.
+
 ## Local draft attachments
 
 `mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
@@ -117,6 +125,9 @@ The server requests scopes incrementally. Expanding mail access after initial co
 | Own-mail `send` | `Mail.ReadWrite`, `Mail.Send` |
 | Shared calendar `read` | `Calendars.Read.Shared` |
 | Shared mounted calendar `manage` | `Calendars.ReadWrite.Shared` |
+| Shared-mail `read` | `Mail.Read.Shared` |
+| Shared-mail draft, filing, recovery, or deletion action | `Mail.ReadWrite.Shared` |
+| Shared-mail `send` | `Mail.ReadWrite.Shared`, `Mail.Send.Shared` |
 | Refresh tokens (always) | `offline_access` (added automatically by the identity library) |
 
 `Mail.Send` is requested only when an account's own-mail policy enables `send`.

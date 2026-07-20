@@ -31,7 +31,7 @@ func ScopesForCalendarAliases(aliases []resource.CalendarAlias) []string {
 }
 
 // ScopesForAccountConfig returns the account-wide delegated scope union for
-// own-resource policy and every configured shared calendar target.
+// own-resource policy and every configured shared calendar and mail target.
 func ScopesForAccountConfig(account AccountConfig) []string {
 	policy := MailActionPolicy{}
 	if account.MailPolicy != nil {
@@ -43,5 +43,13 @@ func ScopesForAccountConfig(account AccountConfig) []string {
 	if account.CalendarAliases != nil {
 		aliases = *account.CalendarAliases
 	}
-	return OAuthScopeUnion(ScopesForMailPolicy(policy), ScopesForCalendarAliases(aliases))
+	var mailAliases []resource.MailAlias
+	if account.MailAliases != nil {
+		mailAliases = *account.MailAliases
+	}
+	return OAuthScopeUnion(
+		ScopesForMailPolicy(policy),
+		ScopesForCalendarAliases(aliases),
+		ScopesForMailAliases(mailAliases),
+	)
 }

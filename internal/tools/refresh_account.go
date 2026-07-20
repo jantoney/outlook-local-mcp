@@ -107,6 +107,7 @@ func HandleRefreshAccount(registry *auth.AccountRegistry, cfg config.Config) fun
 			scopes = auth.OAuthScopeUnion(
 				auth.ScopesForMailPolicy(mailPolicy),
 				auth.ScopesForCalendarAliases(entry.CalendarAliases),
+				auth.ScopesForMailAliases(entry.MailAliases),
 			)
 		}
 

@@ -6,15 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/mark3labs/mcp-go/mcp"
 )
-
-// mailPolicyMutationMu serializes persistence and runtime registry changes so
-// one successful policy mutation becomes visible as a single ordered update.
-var mailPolicyMutationMu sync.Mutex
 
 // HandleSetMailPolicy returns a handler that partially updates one account's
 // independent own-mail action policy. It persists before runtime mutation,
@@ -28,8 +23,8 @@ var mailPolicyMutationMu sync.Mutex
 // Returns a local-only MCP handler. Errors are represented as tool results.
 func HandleSetMailPolicy(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		mailPolicyMutationMu.Lock()
-		defer mailPolicyMutationMu.Unlock()
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
 
 		label, err := request.RequireString("label")
 		if err != nil {
@@ -53,9 +48,12 @@ func HandleSetMailPolicy(registry *auth.AccountRegistry, accountsPath string) fu
 			return mcp.NewToolResultError(fmt.Sprintf("persist account %q mail policy: %s", label, err)), nil
 		}
 
-		calendarScopes := auth.ScopesForCalendarAliases(entry.CalendarAliases)
-		oldScopes := auth.OAuthScopeUnion(auth.ScopesForMailPolicy(entry.MailPolicy), calendarScopes)
-		newScopes := auth.OAuthScopeUnion(auth.ScopesForMailPolicy(policy), calendarScopes)
+		sharedScopes := auth.OAuthScopeUnion(
+			auth.ScopesForCalendarAliases(entry.CalendarAliases),
+			auth.ScopesForMailAliases(entry.MailAliases),
+		)
+		oldScopes := auth.OAuthScopeUnion(auth.ScopesForMailPolicy(entry.MailPolicy), sharedScopes)
+		newScopes := auth.OAuthScopeUnion(auth.ScopesForMailPolicy(policy), sharedScopes)
 		scopesChanged := !auth.OAuthScopeSetEqual(oldScopes, newScopes)
 		if err := registry.Update(label, func(current *auth.AccountEntry) {
 			current.MailPolicy = policy

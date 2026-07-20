@@ -59,6 +59,10 @@ type AccountConfig struct {
 	// CalendarAliases is the account-scoped allowlist of shared calendar
 	// targets. A missing field is the secure legacy default of no aliases.
 	CalendarAliases *[]resource.CalendarAlias `json:"calendar_aliases,omitempty"`
+
+	// MailAliases is the separate account-scoped allowlist of shared owner-view
+	// mailboxes. A missing field is the secure legacy default of no aliases.
+	MailAliases *[]resource.MailAlias `json:"mail_aliases,omitempty"`
 }
 
 // AccountsFile is the top-level structure of the persistent accounts JSON file.

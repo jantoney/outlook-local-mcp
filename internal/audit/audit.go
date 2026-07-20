@@ -81,6 +81,18 @@ type AuditEntry struct {
 
 	// ResourceID is the primary message, event, calendar, or attachment ID.
 	ResourceID string `json:"resource_id,omitempty"`
+
+	// TargetAlias is the selected account-scoped shared-resource selector.
+	TargetAlias string `json:"target_alias,omitempty"`
+
+	// TargetKind is the selected target's immutable resource kind.
+	TargetKind string `json:"target_kind,omitempty"`
+
+	// TargetView is the selected target's immutable mailbox view.
+	TargetView string `json:"target_view,omitempty"`
+
+	// TargetCompatibility is the local tenant-context compatibility decision.
+	TargetCompatibility string `json:"target_compatibility,omitempty"`
 }
 
 // MaskAuditEmail masks an email address by keeping only the first character of
@@ -227,6 +239,7 @@ func EmitAuditLog(entry AuditEntry) {
 func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
+		ctx = auth.WithAuditTargetRecorder(ctx)
 		result, err := handler(ctx, request)
 		durationMs := time.Since(start).Milliseconds()
 
@@ -266,22 +279,38 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 			mailPolicy = info.MailPolicy
 		}
 		resourceID := argumentString(args, "message_id", "event_id", "calendar_id", "attachment_id")
+		targetAlias := ""
+		targetKind := ""
+		targetView := ""
+		targetCompatibility := ""
+		if target, ok := auth.AuditTargetFromContext(ctx); ok {
+			targetAlias = target.Alias
+			targetKind = string(target.ResourceKind)
+			targetView = string(target.MailboxView)
+			targetCompatibility = target.Compatibility
+			mailPolicy = target.MailPolicy
+			resourceID = string(target.ResourceID)
+		}
 
 		entry := AuditEntry{
-			Audit:          true,
-			Timestamp:      start.UTC().Format(time.RFC3339),
-			ToolName:       toolName,
-			OperationType:  opType,
-			Parameters:     params,
-			Outcome:        outcome,
-			DurationMs:     durationMs,
-			ErrorMessage:   errMsg,
-			EventID:        eventID,
-			CalendarID:     calendarID,
-			Account:        account,
-			MailPolicy:     mailPolicy,
-			MailCapability: mailCapabilityForTool(toolName),
-			ResourceID:     resourceID,
+			Audit:               true,
+			Timestamp:           start.UTC().Format(time.RFC3339),
+			ToolName:            toolName,
+			OperationType:       opType,
+			Parameters:          params,
+			Outcome:             outcome,
+			DurationMs:          durationMs,
+			ErrorMessage:        errMsg,
+			EventID:             eventID,
+			CalendarID:          calendarID,
+			Account:             account,
+			MailPolicy:          mailPolicy,
+			MailCapability:      mailCapabilityForTool(toolName),
+			ResourceID:          resourceID,
+			TargetAlias:         targetAlias,
+			TargetKind:          targetKind,
+			TargetView:          targetView,
+			TargetCompatibility: targetCompatibility,
 		}
 		EmitAuditLog(entry)
 

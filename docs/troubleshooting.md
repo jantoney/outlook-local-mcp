@@ -307,6 +307,14 @@ If Graph no longer returns a configured mounted calendar ID, the server does not
 
 ---
 
+## Shared mailbox is incompatible {#shared-mail-incompatible}
+
+Shared-mail configuration and use require authoritative token evidence for an organizational Microsoft 365 tenant. Personal Microsoft accounts and unknown token contexts fail closed before Graph traffic, regardless of granted OAuth scopes.
+
+**Remedy:** Confirm `token_tenant_context` with `account.list` or `system.status`. Reconnect the intended work or school account if validated tenant evidence is missing. Configure the alias under that account and separately verify Exchange Full Access, folder delegation, or Send As/Send on Behalf rights as required. Removing an invalid local alias remains available without Graph traffic.
+
+---
+
 ## In-server documentation access
 
 The server embeds this guide and other user-facing documentation. The LLM can access it directly without leaving the session:

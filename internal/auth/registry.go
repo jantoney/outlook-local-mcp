@@ -67,6 +67,10 @@ type AccountEntry struct {
 	// Each entry is an immutable routing identity snapshot.
 	CalendarAliases []resource.CalendarAlias
 
+	// MailAliases is the separate current account-scoped shared-mail allowlist.
+	// Each entry contains immutable routing identity and an exact local policy.
+	MailAliases []resource.MailAlias
+
 	// Scopes is the active delegated OAuth scope set used by this account's
 	// current Graph client. It is nil while the account is disconnected.
 	Scopes []string

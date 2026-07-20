@@ -5,35 +5,30 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/resource"
 )
 
-// accountPolicyMutationMu serializes own-mail, calendar-alias, and mail-alias
-// persistence with runtime scope-state publication in this process.
-var accountPolicyMutationMu sync.Mutex
-
-// replaceCalendarAliases persists and publishes one account's calendar alias
-// family as one serialized mutation. It disconnects and clears local auth only
-// when the account-wide OAuth scope union changes.
-func replaceCalendarAliases(registry *auth.AccountRegistry, accountsPath string, entry *auth.AccountEntry, aliases []resource.CalendarAlias) (bool, error) {
+// replaceMailAliases persists and publishes one account's shared-mail family
+// as one serialized mutation. Authentication is cleared only when the complete
+// account-wide delegated scope union changes.
+func replaceMailAliases(registry *auth.AccountRegistry, accountsPath string, entry *auth.AccountEntry, aliases []resource.MailAlias) (bool, error) {
 	accountPolicyMutationMu.Lock()
 	defer accountPolicyMutationMu.Unlock()
 
 	oldScopes := auth.ScopesForAccountEntry(entry)
 	newScopes := auth.OAuthScopeUnion(
 		auth.ScopesForMailPolicy(entry.MailPolicy),
-		auth.ScopesForCalendarAliases(aliases),
-		auth.ScopesForMailAliases(entry.MailAliases),
+		auth.ScopesForCalendarAliases(entry.CalendarAliases),
+		auth.ScopesForMailAliases(aliases),
 	)
 	scopesChanged := !auth.OAuthScopeSetEqual(oldScopes, newScopes)
-	if err := auth.SetAccountCalendarAliases(accountsPath, entry.Label, aliases); err != nil {
+	if err := auth.SetAccountMailAliases(accountsPath, entry.Label, aliases); err != nil {
 		return false, err
 	}
 	if err := registry.Update(entry.Label, func(current *auth.AccountEntry) {
-		current.CalendarAliases = append([]resource.CalendarAlias(nil), aliases...)
+		current.MailAliases = append([]resource.MailAlias(nil), aliases...)
 		if scopesChanged {
 			current.Client = nil
 			current.Credential = nil
@@ -63,13 +58,13 @@ func replaceCalendarAliases(registry *auth.AccountRegistry, accountsPath string,
 	return true, nil
 }
 
-// calendarAliasByName returns one alias and its index in an account-local
-// family. The returned false value means no alias matched.
-func calendarAliasByName(aliases []resource.CalendarAlias, name string) (resource.CalendarAlias, int, bool) {
+// mailAliasByName returns one account-local shared-mail alias and its index.
+// False means the selector is absent.
+func mailAliasByName(aliases []resource.MailAlias, name string) (resource.MailAlias, int, bool) {
 	for index, alias := range aliases {
 		if alias.Alias == name {
 			return alias, index, true
 		}
 	}
-	return resource.CalendarAlias{}, -1, false
+	return resource.MailAlias{}, -1, false
 }
