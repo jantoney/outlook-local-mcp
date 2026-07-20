@@ -54,26 +54,23 @@ Set `OUTLOOK_MCP_READ_ONLY=true` to disable all write operations. All write verb
 OUTLOOK_MCP_READ_ONLY=true ./outlook-local-mcp
 ```
 
-## Per-account mail profiles
+## Independent mail action policies
 
-The mail operation schema is stable at startup. Authorization is enforced for the selected account at call time using one cumulative profile:
+The mail schema is stable at startup. Each account's own mailbox has independent `read`, `draft`, `move`, `archive`, `trash`, `restore`, `permanent_delete`, and `send` switches. The server checks the exact switch before constructing a Graph route. A broad OAuth token is never treated as local authorization for a disabled action.
 
-| Profile | Delegated mail scopes | Capability |
-|---|---|---|
-| `calendar_only` | none | Calendar only |
-| `mail_read` | `Mail.Read` | Read messages and existing attachments |
-| `mail_manage` | `Mail.ReadWrite` | Read mail, manage drafts, and add local attachments; no send |
-| `mail_send` | `Mail.ReadWrite`, `Mail.Send` | Managed drafts plus human-confirmed draft send |
+`account.list` and `system.status` show the effective matrix. Use `account.set_mail_policy` with an account label and one or more boolean switches; omitted switches remain unchanged. New explicitly added accounts start with every switch off unless the legacy `mail_profile` input is supplied. Permanent deletion and the newly introduced filing actions never become enabled through legacy migration.
 
-Every profile also requests `User.Read` and `Calendars.ReadWrite`. `account.add` accepts `mail_profile`; `account.set_mail_profile` changes it, clears local tokens, disconnects the account, and requires `account.login`. Global `MAIL_ENABLED`, `MAIL_MANAGE_ENABLED`, and `MAIL_SEND_ENABLED` flags remain backward-compatible defaults for the implicit account and legacy records, in increasing precedence. Microsoft consent is not revoked by lowering a local profile.
+Legacy values remain accepted temporarily and map without granting new behavior: `calendar_only` enables nothing; `mail_read` enables only read; `mail_manage` enables read and draft; and `mail_send` enables read, draft, and send. Global `MAIL_ENABLED`, `MAIL_MANAGE_ENABLED`, and `MAIL_SEND_ENABLED` remain migration/default inputs for the implicit account and legacy records.
+
+OAuth scopes are derived from the enabled actions. Read alone contributes `Mail.Read`; draft or any filing/deletion action contributes `Mail.ReadWrite`; send contributes `Mail.ReadWrite` and `Mail.Send`. A policy change applies locally on the next request. The account disconnects and clears local authentication only when the required scope set changes; same-scope policy edits keep the session connected. Microsoft consent is not revoked automatically.
 
 ## Local draft attachments
 
-`mail.add_attachment` attaches exactly one local file to an existing draft and requires `mail_manage` or higher. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
+`mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
 
 ## Confirmed draft send
 
-`mail.send_draft` requires `mail_send` and accepts only an existing draft ID. The server fetches the subject, recipients, and attachment names and presents them through MCP elicitation. It sends only after the human explicitly accepts; unsupported elicitation, decline, and cancel all fail safely. Graph acceptance does not confirm final delivery, which remains subject to Exchange processing.
+`mail.send_draft` requires the exact `send` capability and accepts only an existing draft ID. Draft capability does not imply send. The server fetches the subject, recipients, and attachment names and presents them through MCP elicitation. It sends only after the human explicitly accepts; unsupported elicitation, decline, and cancel all fail safely. Graph acceptance does not confirm final delivery, which remains subject to Exchange processing.
 
 ## Headless and non-interactive authentication
 
@@ -95,13 +92,12 @@ The server requests scopes incrementally. Expanding mail access after initial co
 |---|---|
 | Calendar (always active) | `Calendars.ReadWrite` |
 | Account identity (always active) | `User.Read` |
-| `calendar_only` | *(none)* |
-| `mail_read` | `Mail.Read` |
-| `mail_manage` | `Mail.ReadWrite` |
-| `mail_send` | `Mail.ReadWrite`, `Mail.Send` |
+| Own-mail `read` only | `Mail.Read` |
+| Any draft, filing, recovery, or deletion action | `Mail.ReadWrite` |
+| Own-mail `send` | `Mail.ReadWrite`, `Mail.Send` |
 | Refresh tokens (always) | `offline_access` (added automatically by the identity library) |
 
-`Mail.Send` is requested only for accounts explicitly or by default configured with `mail_send`.
+`Mail.Send` is requested only when an account's own-mail policy enables `send`.
 
 ## Well-known client IDs
 

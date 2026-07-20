@@ -100,9 +100,9 @@ type Verb struct {
 	// "slug" or "slug#anchor" pointing into docs.Bundle (CR-0065 FR-11).
 	SeeDocs []string
 
-	// MinimumProfile is the least per-account mail capability required by this
+	// RequiredCapability is the exact target-local mail action required by this
 	// verb. It is empty for non-mail domains and the mail help verb.
-	MinimumProfile string
+	RequiredCapability string
 
 	// Handler is the MCP handler function invoked when this verb is dispatched.
 	Handler Handler

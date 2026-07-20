@@ -104,6 +104,10 @@ func TestHandleListAccounts_WithAccounts(t *testing.T) {
 	if accounts[0]["authenticated"] != true {
 		t.Errorf("default authenticated = %v, want true", accounts[0]["authenticated"])
 	}
+	policy, ok := accounts[0]["mail_policy"].(map[string]any)
+	if !ok || policy["permanent_delete"] != false {
+		t.Fatalf("default mail_policy = %v, want secure action matrix", accounts[0]["mail_policy"])
+	}
 	if accounts[1]["label"] != "work" {
 		t.Errorf("second account label = %q, want %q", accounts[1]["label"], "work")
 	}

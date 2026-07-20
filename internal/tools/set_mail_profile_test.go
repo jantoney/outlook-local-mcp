@@ -28,6 +28,7 @@ func TestSetMailProfileRequiresReauth(t *testing.T) {
 	if err := registry.Add(&auth.AccountEntry{
 		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
 		Authenticated: true, AuthRecordPath: authRecordPath, MailProfile: auth.MailProfileManage,
+		MailPolicy: auth.MailPolicyFromProfile(auth.MailProfileManage),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +39,14 @@ func TestSetMailProfileRequiresReauth(t *testing.T) {
 		t.Fatalf("HandleSetMailProfile() = (%v, %v)", result, err)
 	}
 	entry, _ := registry.Get("work")
-	if entry.Authenticated || entry.MailProfile != auth.MailProfileRead || entry.Client != nil {
+	if entry.Authenticated || entry.MailPolicy != (auth.MailActionPolicy{Read: true}) || entry.Client != nil {
 		t.Fatalf("entry not safely disconnected: %+v", entry)
 	}
 	if _, err := os.Stat(authRecordPath); !os.IsNotExist(err) {
 		t.Fatalf("auth record still exists: %v", err)
 	}
 	accounts, err := auth.LoadAccounts(accountsPath)
-	if err != nil || len(accounts) != 1 || accounts[0].MailProfile != "mail_read" {
+	if err != nil || len(accounts) != 1 || accounts[0].MailPolicy == nil || *accounts[0].MailPolicy != (auth.MailActionPolicy{Read: true}) || accounts[0].MailProfile != "" {
 		t.Fatalf("persisted accounts = %+v, err = %v", accounts, err)
 	}
 }

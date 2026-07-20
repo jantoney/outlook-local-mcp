@@ -81,7 +81,7 @@ func callStatus(t *testing.T, cfg config.Config, registry *auth.AccountRegistry,
 // object containing version, timezone, accounts array, and uptime.
 func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	registry := auth.NewAccountRegistry()
-	_ = registry.Add(&auth.AccountEntry{Label: "default", Authenticated: true})
+	_ = registry.Add(&auth.AccountEntry{Label: "default", Authenticated: true, MailPolicy: auth.MailActionPolicy{Read: true}})
 	_ = registry.Add(&auth.AccountEntry{Label: "work", Authenticated: false})
 
 	cfg := testConfig()
@@ -97,6 +97,11 @@ func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	accounts, ok := resp["accounts"].([]any)
 	if !ok || len(accounts) != 2 {
 		t.Fatalf("expected 2 accounts, got %v", resp["accounts"])
+	}
+	defaultAccount := accounts[0].(map[string]any)
+	policy, ok := defaultAccount["mail_policy"].(map[string]any)
+	if !ok || policy["read"] != true || policy["permanent_delete"] != false {
+		t.Fatalf("default account policy = %v, want read-only secure matrix", defaultAccount["mail_policy"])
 	}
 
 	// Uptime should be approximately 3600 seconds (1 hour).

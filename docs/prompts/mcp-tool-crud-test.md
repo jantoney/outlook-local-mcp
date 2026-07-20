@@ -520,9 +520,16 @@ To verify AC-5 manually:
 3. Restart the server.
 4. Call `{tool: "account", args: {operation: "list"}}` and verify "default" is present.
 
-### Step 30 -- Mail operations (skip if selected account is below mail_read)
+### Step 29c -- Independent own-mail policy secure default
 
-Use the selected account's `mail_profile` from Step 1. If it is `calendar_only`, **skip** Steps 30 through 36b and record them as SKIP.
+1. Call `{tool: "account", args: {operation: "list", output: "summary"}}` and record the selected account's eight-field `mail_policy` matrix.
+2. Call `{tool: "account", args: {operation: "set_mail_policy", label: "<selected-account>", permanent_delete: false}}`.
+3. **Pass:** The response says the policy is unchanged or updated immediately, the account remains available when scopes did not change, and a second account list shows `permanent_delete: false` with every other switch unchanged.
+4. **Fail:** The operation enables another action, writes a cumulative profile, or disconnects despite an unchanged scope set.
+
+### Step 30 -- Mail operations (skip if selected account has read disabled)
+
+Use the selected account's `mail_policy` from Step 1. If `read` is false, **skip** read-dependent Steps 30 through 36b and record them as SKIP.
 
 **30a.** Call `{tool: "mail", args: {operation: "help"}}` to discover available mail verbs.
 
@@ -541,9 +548,9 @@ Call `{tool: "mail", args: {operation: "list_messages", ...}}` four times with t
 - **Verify:** All calls return plain text. The filtered counts are less than or equal to the baseline.
 - **Fail:** If any call returns an error or ignores the filter.
 
-### Step 31 -- Create draft (skip if selected account is below mail_manage)
+### Step 31 -- Create draft (skip if selected account has draft disabled)
 
-If the selected account is below `mail_manage`, **skip** draft write steps and record them as SKIP.
+If the selected account's `draft` switch is false, **skip** draft write steps and record them as SKIP.
 
 Call `{tool: "mail", args: {operation: "create_draft", to: "<own UPN>", subject: "CRUD test draft", body: "Created by MCP CRUD lifecycle test.", importance: "normal"}}`.
 
@@ -608,7 +615,7 @@ If no safe test file path under `OUTLOOK_MCP_ATTACHMENT_ROOTS` was supplied by t
 
 ### Step 36b -- Human-confirmed draft send
 
-Run only in interactive mode with a selected account whose profile is `mail_send`. Create a dedicated self-addressed draft, call `{tool: "mail", args: {operation: "send_draft", message_id: "<draft ID>"}}`, and verify MCP elicitation displays its subject, recipient, and attachment names before accepting. Verify the confirmation says Microsoft Graph accepted the send and that delivery remains subject to Exchange processing. In non-interactive mode or without `mail_send`, record SKIP; a boolean confirmation argument must never be supplied.
+Run only in interactive mode with a selected account whose `send` capability is true. Create a dedicated self-addressed draft, call `{tool: "mail", args: {operation: "send_draft", message_id: "<draft ID>"}}`, and verify MCP elicitation displays its subject, recipient, and attachment names before accepting. Verify the confirmation says Microsoft Graph accepted the send and that delivery remains subject to Exchange processing. In non-interactive mode or with `send` disabled, record SKIP; a boolean confirmation argument must never be supplied.
 
 - **Verify:** Accepting an unchanged draft sends once; declining or changing the draft sends nothing.
 - **Fail:** If sending occurs without accepted elicitation or if the confirmation claims final delivery.

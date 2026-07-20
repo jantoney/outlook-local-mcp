@@ -120,6 +120,9 @@ type AccountInfo struct {
 	// MailProfile is the selected account's effective capability profile.
 	MailProfile MailProfile
 
+	// MailPolicy is the selected own-mail target's independent action policy.
+	MailPolicy MailActionPolicy
+
 	// Scopes is the selected account's active delegated OAuth scope set.
 	Scopes []string
 

@@ -275,6 +275,13 @@ func TestHandleAddAccount_UsesConfigDefaults(t *testing.T) {
 	if entry.CacheName != wantCacheName {
 		t.Errorf("CacheName = %q, want %q", entry.CacheName, wantCacheName)
 	}
+	if entry.MailPolicy != (auth.MailActionPolicy{}) {
+		t.Fatalf("new account policy = %+v, want every action disabled", entry.MailPolicy)
+	}
+	persisted, err := auth.LoadAccounts(cfg.AccountsPath)
+	if err != nil || len(persisted) != 1 || persisted[0].MailPolicy == nil || *persisted[0].MailPolicy != (auth.MailActionPolicy{}) {
+		t.Fatalf("persisted new-account policy = %+v, err = %v", persisted, err)
+	}
 }
 
 // TestAddAccount_BrowserAuth_Success verifies that add_account with browser auth

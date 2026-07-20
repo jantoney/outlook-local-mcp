@@ -34,8 +34,8 @@ var errorSeeTable = map[string]string{
 	"auth_expired":                "token-refresh",
 
 	// Mail feature flags
-	"mail_disabled":            "mail-disabled",
-	"mail_management_disabled": "mail-management-disabled",
+	"mail_disabled":            "insufficient-mail-capability",
+	"mail_management_disabled": "insufficient-mail-capability",
 }
 
 // ErrorSeeHint returns the doc:// URI of the troubleshooting section that

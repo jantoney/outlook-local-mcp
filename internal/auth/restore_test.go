@@ -214,7 +214,7 @@ func TestRestoreAccountsMigratesAndRegistersAccountIdentity(t *testing.T) {
 	dir := t.TempDir()
 	accountsPath := filepath.Join(dir, "accounts.json")
 	if err := SaveAccounts(accountsPath, []AccountConfig{{
-		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser",
+		Label: "work", ClientID: "client", TenantID: "tenant", AuthMethod: "browser", MailProfile: "mail_manage",
 	}}); err != nil {
 		t.Fatalf("SaveAccounts() error = %v", err)
 	}
@@ -237,6 +237,13 @@ func TestRestoreAccountsMigratesAndRegistersAccountIdentity(t *testing.T) {
 	}
 	if persisted[0].AccountID == "" || entry.AccountID != persisted[0].AccountID {
 		t.Fatalf("runtime identity = %q, persisted identity = %q", entry.AccountID, persisted[0].AccountID)
+	}
+	wantPolicy := MailActionPolicy{Read: true, Draft: true}
+	if persisted[0].MailPolicy == nil || *persisted[0].MailPolicy != wantPolicy {
+		t.Fatalf("persisted policy = %#v, want %+v", persisted[0].MailPolicy, wantPolicy)
+	}
+	if entry.MailPolicy != wantPolicy {
+		t.Fatalf("runtime policy = %+v, want %+v", entry.MailPolicy, wantPolicy)
 	}
 }
 

@@ -98,11 +98,11 @@ func HandleCompleteAuth(cred auth.Authenticator, authRecordPath string, registry
 			targetPath = entry.AuthRecordPath
 			targetScopes = entry.Scopes
 			if len(targetScopes) == 0 {
-				if entry.MailProfile == auth.MailProfileCalendarOnly {
-					targetScopes = scopes
-				} else {
-					targetScopes = auth.ScopesForProfile(entry.MailProfile)
+				mailPolicy := entry.MailPolicy
+				if mailPolicy == (auth.MailActionPolicy{}) && entry.MailProfile != auth.MailProfileCalendarOnly {
+					mailPolicy = auth.MailPolicyFromProfile(entry.MailProfile)
 				}
+				targetScopes = auth.ScopesForMailPolicy(mailPolicy)
 			}
 			logger = logger.With("account", accountLabel)
 		}

@@ -111,7 +111,8 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		if entry.Authenticated {
 			return mcp.NewToolResultError(fmt.Sprintf("Account %q is already connected.", label)), nil
 		}
-		profile := loginMailProfile(entry, cfg)
+		mailPolicy := loginMailPolicy(entry, cfg)
+		profile := auth.LegacyProfileForPolicy(mailPolicy)
 		scopes := s.selectedScopes(profile)
 
 		clientID := entry.ClientID
@@ -188,6 +189,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			e.CacheName = cacheName
 			e.Authenticated = true
 			e.MailProfile = profile
+			e.MailPolicy = mailPolicy
 			e.Scopes = append([]string(nil), scopes...)
 			e.Email = ""
 		}); err != nil {
@@ -227,23 +229,28 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 	}
 }
 
-// loginMailProfile returns the profile stored on the runtime entry. For a
-// zero-valued legacy entry it consults accounts.json by label and otherwise
-// derives the backward-compatible default from global flags.
-func loginMailProfile(entry *auth.AccountEntry, cfg config.Config) auth.MailProfile {
-	if entry.MailProfile != auth.MailProfileCalendarOnly {
-		return entry.MailProfile
-	}
+// loginMailPolicy returns the authoritative persisted independent policy. It
+// accepts legacy profile records and global defaults only as migration input.
+func loginMailPolicy(entry *auth.AccountEntry, cfg config.Config) auth.MailActionPolicy {
 	accounts, err := auth.LoadAccounts(cfg.AccountsPath)
 	if err == nil {
 		for _, account := range accounts {
-			if account.Label != entry.Label || account.MailProfile == "" {
+			if account.Label != entry.Label {
 				continue
 			}
+			if account.MailPolicy != nil {
+				return *account.MailPolicy
+			}
 			if profile, parseErr := auth.ParseMailProfile(account.MailProfile); parseErr == nil {
-				return profile
+				return auth.MailPolicyFromProfile(profile)
 			}
 		}
 	}
-	return auth.MailProfileFromConfig(cfg)
+	if entry.MailPolicy != (auth.MailActionPolicy{}) {
+		return entry.MailPolicy
+	}
+	if entry.MailProfile != auth.MailProfileCalendarOnly {
+		return auth.MailPolicyFromProfile(entry.MailProfile)
+	}
+	return auth.MailPolicyFromProfile(auth.MailProfileFromConfig(cfg))
 }

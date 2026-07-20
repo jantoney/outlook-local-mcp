@@ -47,7 +47,12 @@ type AccountConfig struct {
 
 	// MailProfile is the stable per-account capability profile name. Empty
 	// records are legacy entries and derive their profile from server defaults.
+	// New writes use MailPolicy; this field remains read-only migration input.
 	MailProfile string `json:"mail_profile,omitempty"`
+
+	// MailPolicy is the independent own-mail action policy. A nil value marks
+	// a legacy record that must be migrated before runtime registration.
+	MailPolicy *MailActionPolicy `json:"mail_policy,omitempty"`
 }
 
 // AccountsFile is the top-level structure of the persistent accounts JSON file.

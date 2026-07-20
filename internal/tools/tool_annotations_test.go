@@ -308,7 +308,7 @@ func TestCR0066PerVerbAnnotations_DocumentedInHelp(t *testing.T) {
 			"Safety: read-only=false, destructive=false, idempotent=false, open-world=true",
 		},
 		"account": {
-			"set_mail_profile",
+			"set_mail_policy", "set_mail_profile",
 			"Safety: read-only=false, destructive=false, idempotent=true, open-world=false",
 		},
 	}

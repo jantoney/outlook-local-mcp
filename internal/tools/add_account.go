@@ -65,7 +65,7 @@ func NewAddAccountTool() mcp.Tool {
 			mcp.Description("Authentication method: 'browser', 'device_code', or 'auth_code'. Defaults to the server's configured method."),
 		),
 		mcp.WithString("mail_profile",
-			mcp.Description("Account capability profile: calendar_only, mail_read, mail_manage, or mail_send. Defaults to the server flags."),
+			mcp.Description("Optional legacy migration input: calendar_only, mail_read, mail_manage, or mail_send. Omit for the secure all-actions-off default."),
 			mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send"),
 		),
 	)
@@ -277,11 +277,12 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 				logger.Error("graph client creation failed", "label", label, "error", err.Error())
 				return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
 			}
+			mailPolicy := auth.MailPolicyFromProfile(p.mailProfile)
 			entry := &auth.AccountEntry{
 				AccountID: accountID, Label: label, ClientID: p.clientID, TenantID: p.tenantID,
 				AuthMethod: p.authMethod, Credential: p.cred, Authenticator: p.authenticator,
 				Client: client, AuthRecordPath: p.authRecordPath, CacheName: p.cacheName,
-				Authenticated: true, MailProfile: p.mailProfile, Scopes: auth.ScopesForProfile(p.mailProfile),
+				Authenticated: true, MailProfile: p.mailProfile, MailPolicy: mailPolicy, Scopes: auth.ScopesForMailPolicy(mailPolicy),
 			}
 			if err := registry.Add(entry); err != nil {
 				logger.Error("account registration failed", "label", label, "error", err.Error())
@@ -289,7 +290,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			}
 			if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
 				AccountID: accountID, Label: label, ClientID: p.clientID, TenantID: p.tenantID, AuthMethod: p.authMethod,
-				MailProfile: p.mailProfile.String(),
+				MailPolicy: &mailPolicy,
 			}); err != nil {
 				logger.Warn("failed to persist account config", "label", label, "error", err.Error())
 			}
@@ -314,7 +315,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 		clientID := request.GetString("client_id", cfg.ClientID)
 		tenantID := request.GetString("tenant_id", cfg.TenantID)
 		authMethod := request.GetString("auth_method", cfg.AuthMethod)
-		profile := auth.MailProfileFromConfig(cfg)
+		profile := auth.MailProfileCalendarOnly
 		if requestedProfile := request.GetString("mail_profile", ""); requestedProfile != "" {
 			profile, err = auth.ParseMailProfile(requestedProfile)
 			if err != nil {
@@ -360,6 +361,7 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 		}
 
 		// Register the account with identity metadata for persistence.
+		mailPolicy := auth.MailPolicyFromProfile(profile)
 		entry := &auth.AccountEntry{
 			AccountID:      accountID,
 			Label:          label,
@@ -373,7 +375,8 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			CacheName:      cacheName,
 			Authenticated:  true,
 			MailProfile:    profile,
-			Scopes:         auth.ScopesForProfile(profile),
+			MailPolicy:     mailPolicy,
+			Scopes:         auth.ScopesForMailPolicy(mailPolicy),
 		}
 
 		if err := registry.Add(entry); err != nil {
@@ -383,12 +386,12 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 
 		// Persist account identity configuration to accounts.json.
 		if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
-			AccountID:   accountID,
-			Label:       label,
-			ClientID:    clientID,
-			TenantID:    tenantID,
-			AuthMethod:  authMethod,
-			MailProfile: profile.String(),
+			AccountID:  accountID,
+			Label:      label,
+			ClientID:   clientID,
+			TenantID:   tenantID,
+			AuthMethod: authMethod,
+			MailPolicy: &mailPolicy,
 		}); err != nil {
 			logger.Warn("failed to persist account config", "label", label, "error", err.Error())
 		}

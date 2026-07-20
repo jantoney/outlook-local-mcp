@@ -73,8 +73,11 @@ type AuditEntry struct {
 	// Account is the selected account label for the operation.
 	Account string `json:"account,omitempty"`
 
-	// MailProfile is the selected account's effective mail capability profile.
-	MailProfile string `json:"mail_profile,omitempty"`
+	// MailPolicy is the selected target's effective independent action matrix.
+	MailPolicy auth.MailActionPolicy `json:"mail_policy"`
+
+	// MailCapability is the exact local action required by this mail operation.
+	MailCapability string `json:"mail_capability,omitempty"`
 
 	// ResourceID is the primary message, event, calendar, or attachment ID.
 	ResourceID string `json:"resource_id,omitempty"`
@@ -257,27 +260,28 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 			calendarID = v
 		}
 		account := argumentString(args, "account", "label")
-		mailProfile := argumentString(args, "mail_profile")
+		mailPolicy := auth.MailActionPolicy{}
 		if info, ok := auth.AccountInfoFromContext(ctx); ok {
 			account = info.Label
-			mailProfile = info.MailProfile.String()
+			mailPolicy = info.MailPolicy
 		}
 		resourceID := argumentString(args, "message_id", "event_id", "calendar_id", "attachment_id")
 
 		entry := AuditEntry{
-			Audit:         true,
-			Timestamp:     start.UTC().Format(time.RFC3339),
-			ToolName:      toolName,
-			OperationType: opType,
-			Parameters:    params,
-			Outcome:       outcome,
-			DurationMs:    durationMs,
-			ErrorMessage:  errMsg,
-			EventID:       eventID,
-			CalendarID:    calendarID,
-			Account:       account,
-			MailProfile:   mailProfile,
-			ResourceID:    resourceID,
+			Audit:          true,
+			Timestamp:      start.UTC().Format(time.RFC3339),
+			ToolName:       toolName,
+			OperationType:  opType,
+			Parameters:     params,
+			Outcome:        outcome,
+			DurationMs:     durationMs,
+			ErrorMessage:   errMsg,
+			EventID:        eventID,
+			CalendarID:     calendarID,
+			Account:        account,
+			MailPolicy:     mailPolicy,
+			MailCapability: mailCapabilityForTool(toolName),
+			ResourceID:     resourceID,
 		}
 		EmitAuditLog(entry)
 

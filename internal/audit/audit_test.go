@@ -365,9 +365,9 @@ func TestAuditWrap_Success(t *testing.T) {
 	}
 }
 
-// TestAuditWrapCapturesAccountProfileAndResource verifies the audit contract
-// for per-account mail operations, including auto-selected account context.
-func TestAuditWrapCapturesAccountProfileAndResource(t *testing.T) {
+// TestAuditWrapCapturesAccountPolicyCapabilityAndResource verifies the audit
+// contract records exact authorization evidence for a mail operation.
+func TestAuditWrapCapturesAccountPolicyCapabilityAndResource(t *testing.T) {
 	var buf bytes.Buffer
 	setAuditState(t, true, &buf)
 	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -375,14 +375,15 @@ func TestAuditWrapCapturesAccountProfileAndResource(t *testing.T) {
 	}
 	request := mcp.CallToolRequest{}
 	request.Params.Arguments = map[string]any{"message_id": "draft-1"}
-	ctx := auth.WithAccountInfo(context.Background(), auth.AccountInfo{Label: "personal", MailProfile: auth.MailProfileSend})
+	policy := auth.MailActionPolicy{Read: true, Draft: true, Send: true}
+	ctx := auth.WithAccountInfo(context.Background(), auth.AccountInfo{Label: "personal", MailPolicy: policy})
 	_, _ = AuditWrap("mail.send_draft", "send", handler)(ctx, request)
 	var entry AuditEntry
 	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
 		t.Fatal(err)
 	}
-	if entry.Account != "personal" || entry.MailProfile != "mail_send" || entry.ResourceID != "draft-1" {
-		t.Fatalf("audit identity = account %q profile %q resource %q", entry.Account, entry.MailProfile, entry.ResourceID)
+	if entry.Account != "personal" || entry.MailPolicy != policy || entry.MailCapability != "send" || entry.ResourceID != "draft-1" {
+		t.Fatalf("audit identity = account %q policy %+v capability %q resource %q", entry.Account, entry.MailPolicy, entry.MailCapability, entry.ResourceID)
 	}
 }
 

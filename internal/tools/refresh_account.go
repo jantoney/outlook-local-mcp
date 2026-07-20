@@ -100,11 +100,11 @@ func HandleRefreshAccount(registry *auth.AccountRegistry, cfg config.Config) fun
 		}
 		scopes := entry.Scopes
 		if len(scopes) == 0 {
-			profile := entry.MailProfile
-			if profile == auth.MailProfileCalendarOnly {
-				profile = auth.MailProfileFromConfig(cfg)
+			mailPolicy := entry.MailPolicy
+			if mailPolicy == (auth.MailActionPolicy{}) && entry.MailProfile != auth.MailProfileCalendarOnly {
+				mailPolicy = auth.MailPolicyFromProfile(entry.MailProfile)
 			}
-			scopes = auth.ScopesForProfile(profile)
+			scopes = auth.ScopesForMailPolicy(mailPolicy)
 		}
 
 		tok, err := entry.Credential.GetToken(ctx, policy.TokenRequestOptions{

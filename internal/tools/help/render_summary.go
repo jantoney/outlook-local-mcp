@@ -29,8 +29,8 @@ type verbSummary struct {
 	// SeeDocs holds documentation references in slug or slug#anchor form (CR-0065 FR-10).
 	SeeDocs []string `json:"see_docs,omitempty"`
 
-	// MinimumProfile is the least selected-account mail capability required.
-	MinimumProfile string `json:"minimum_profile,omitempty"`
+	// RequiredCapability is the exact selected-target mail action required.
+	RequiredCapability string `json:"required_capability,omitempty"`
 
 	// Parameters lists the verb's input parameters with name, type, and
 	// required-ness so callers can construct valid invocations without
@@ -73,13 +73,13 @@ func renderSummary(verbs []tools.Verb) *mcp.CallToolResult {
 	summaries := make([]verbSummary, len(verbs))
 	for i, v := range verbs {
 		summaries[i] = verbSummary{
-			Name:           v.Name,
-			Summary:        v.Summary,
-			Description:    v.Description,
-			Examples:       toExampleJSON(v.Examples),
-			SeeDocs:        v.SeeDocs,
-			MinimumProfile: v.MinimumProfile,
-			Parameters:     verbParameters(v),
+			Name:               v.Name,
+			Summary:            v.Summary,
+			Description:        v.Description,
+			Examples:           toExampleJSON(v.Examples),
+			SeeDocs:            v.SeeDocs,
+			RequiredCapability: v.RequiredCapability,
+			Parameters:         verbParameters(v),
 		}
 	}
 

@@ -96,7 +96,7 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 				mcp.Description("Authentication method: 'browser', 'device_code', or 'auth_code'. Defaults to the server's configured method."),
 			),
 			mcp.WithString("mail_profile",
-				mcp.Description("Capability profile: calendar_only, mail_read, mail_manage, or mail_send. Defaults to global flags."),
+				mcp.Description("Optional legacy migration input: calendar_only, mail_read, mail_manage, or mail_send. Omit for the secure all-actions-off default."),
 				mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send"),
 			),
 		},
@@ -205,9 +205,9 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 
 	setMailProfileVerb := tools.Verb{
 		Name:        "set_mail_profile",
-		Summary:     "change an account capability profile and require reauthentication",
-		Description: "Changes one account's mail profile, clears its local cached tokens, and disconnects it. Call account.login afterward. Lower profiles block disallowed operations immediately; revoke Microsoft app consent separately when full grant revocation is required.",
-		SeeDocs:     []string{"concepts#per-account-mail-profiles", "troubleshooting#revoke-microsoft-app-consent"},
+		Summary:     "map a legacy cumulative profile to an independent own-mail policy",
+		Description: "Transition input for calendar_only, mail_read, mail_manage, and mail_send. The profile is deterministically mapped to an independent own-mail policy without enabling move, Archive, trash, restore, or permanent deletion. Prefer set_mail_policy for new configuration.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "troubleshooting#revoke-microsoft-app-consent"},
 		Handler: wrap("account.set_mail_profile", "write", ReadOnlyGuard(
 			"account.set_mail_profile", c.cfg.ReadOnly, tools.HandleSetMailProfile(c.registry, c.cfg.AccountsPath))),
 		Annotations: []mcp.ToolOption{
@@ -224,6 +224,24 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		},
 	}
 
+	setMailPolicyVerb := tools.Verb{
+		Name:        "set_mail_policy",
+		Summary:     "change exact own-mail actions for one account",
+		Description: "Partially updates one account's independent own-mail actions. Omitted switches stay unchanged. Policy changes apply immediately; the account disconnects and clears local authentication only when its required OAuth scopes change. OAuth consent is not target authorization and is not revoked automatically.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "troubleshooting#revoke-microsoft-app-consent"},
+		Handler: wrap("account.set_mail_policy", "write", ReadOnlyGuard(
+			"account.set_mail_policy", c.cfg.ReadOnly, tools.HandleSetMailPolicy(c.registry, c.cfg.AccountsPath))),
+		Annotations: []mcp.ToolOption{
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+		},
+		Schema: append([]mcp.ToolOption{
+			mcp.WithString("label", mcp.Required(), mcp.Description("Label of the account to change.")),
+		}, mailPolicySchema()...),
+	}
+
 	verbs := []tools.Verb{
 		help.NewHelpVerb(registryPtr),
 		addVerb,
@@ -232,6 +250,7 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		loginVerb,
 		logoutVerb,
 		refreshVerb,
+		setMailPolicyVerb,
 		setMailProfileVerb,
 	}
 

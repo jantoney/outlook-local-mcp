@@ -127,6 +127,7 @@ func main() {
 			CacheName:      cfg.CacheName,
 			Authenticated:  true,
 			MailProfile:    auth.MailProfileFromConfig(cfg),
+			MailPolicy:     auth.MailPolicyFromProfile(auth.MailProfileFromConfig(cfg)),
 			Scopes:         append([]string(nil), scopes...),
 		}); err != nil {
 			slog.Error("default account registration failed", "error", err)

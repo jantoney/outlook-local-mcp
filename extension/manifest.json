@@ -62,11 +62,11 @@
     },
     {
       "name": "mail",
-      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected account profile authorizes each operation. Includes read/search, managed drafts, add_attachment (allowlisted local file), and send_draft (human-confirmed existing draft send)."
+      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected target's exact action policy authorizes each operation. Includes read/search, drafts, add_attachment (allowlisted local file), and send_draft (human-reviewed existing draft send)."
     },
     {
       "name": "account",
-      "description": "Account management for Microsoft accounts. Required operation: help, add, remove, list, login, logout, refresh, and set_mail_profile (change one account's risk profile and require reauthentication)."
+      "description": "Account management for Microsoft accounts. Required operation: help, add, remove, list, login, logout, refresh, set_mail_policy (independent own-mail actions), and legacy set_mail_profile migration input."
     },
     {
       "name": "system",
@@ -108,21 +108,21 @@
     "mail_enabled": {
       "type": "boolean",
       "title": "Default Mail Read Access",
-      "description": "Default legacy and implicit accounts to mail_read. Per-account mail_profile overrides this.",
+      "description": "Legacy and implicit default mapping that enables the own-mail read action. Explicit new accounts default all actions off.",
       "required": false,
       "default": false
     },
     "mail_manage_enabled": {
       "type": "boolean",
       "title": "Default Draft Management",
-      "description": "Default legacy and implicit accounts to mail_manage. Implies mail read but not send.",
+      "description": "Legacy and implicit default mapping that enables own-mail read and draft actions.",
       "required": false,
       "default": false
     },
     "mail_send_enabled": {
       "type": "boolean",
       "title": "Default Confirmed Draft Send",
-      "description": "Default legacy and implicit accounts to mail_send. Send still requires explicit human MCP elicitation for every draft.",
+      "description": "Legacy and implicit default mapping that enables own-mail read, draft, and human-reviewed send actions.",
       "required": false,
       "default": false
     },

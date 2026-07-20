@@ -62,9 +62,9 @@ func formatVerbText(v tools.Verb, n int) string {
 		b.WriteString(v.Description)
 		b.WriteString("\n")
 	}
-	if v.MinimumProfile != "" {
-		b.WriteString("   Minimum profile: ")
-		b.WriteString(v.MinimumProfile)
+	if v.RequiredCapability != "" {
+		b.WriteString("   Required capability: ")
+		b.WriteString(v.RequiredCapability)
 		b.WriteString("\n")
 	}
 	if len(v.Annotations) > 0 {

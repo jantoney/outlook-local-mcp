@@ -109,6 +109,7 @@ func (s *accountResolverState) middleware(next mcpserver.ToolHandlerFunc) mcpser
 			Label:       entry.Label,
 			Email:       entry.Email,
 			MailProfile: entry.MailProfile,
+			MailPolicy:  entry.MailPolicy,
 			Scopes:      append([]string(nil), entry.Scopes...),
 			Advisory:    s.disconnectedAdvisory(entry, request),
 		})

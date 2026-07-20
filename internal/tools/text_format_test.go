@@ -475,11 +475,11 @@ func TestFormatAccountsText(t *testing.T) {
 
 	result := FormatAccountsText(accounts)
 
-	if !strings.Contains(result, "1. work (authenticated)") {
-		t.Errorf("expected '1. work (authenticated)' in output, got:\n%s", result)
+	if !strings.Contains(result, "1. work (authenticated, mail=none)") {
+		t.Errorf("expected secure mail policy in work output, got:\n%s", result)
 	}
-	if !strings.Contains(result, "2. personal (disconnected)") {
-		t.Errorf("expected '2. personal (disconnected)' in output, got:\n%s", result)
+	if !strings.Contains(result, "2. personal (disconnected, mail=none)") {
+		t.Errorf("expected secure mail policy in personal output, got:\n%s", result)
 	}
 	if !strings.Contains(result, "2 account(s) total.") {
 		t.Error("expected '2 account(s) total.' in output")
@@ -497,10 +497,10 @@ func TestFormatAccountsText_WithUPNAndMethod(t *testing.T) {
 
 	result := FormatAccountsText(accounts)
 
-	if !strings.Contains(result, "1. default — alice@contoso.com (authenticated, browser)") {
+	if !strings.Contains(result, "1. default — alice@contoso.com (authenticated, browser, mail=none)") {
 		t.Errorf("expected CR-0056 format line for default, got:\n%s", result)
 	}
-	if !strings.Contains(result, "2. work — bob@contoso.com (disconnected, device_code)") {
+	if !strings.Contains(result, "2. work — bob@contoso.com (disconnected, device_code, mail=none)") {
 		t.Errorf("expected CR-0056 format line for work, got:\n%s", result)
 	}
 }
@@ -573,11 +573,11 @@ func TestFormatAccountsText_WithEmail(t *testing.T) {
 
 	result := FormatAccountsText(accounts)
 
-	if !strings.Contains(result, "1. work — work@example.com (authenticated)") {
+	if !strings.Contains(result, "1. work — work@example.com (authenticated, mail=none)") {
 		t.Errorf("expected formatted account line with email, got:\n%s", result)
 	}
 	// Personal has no email — should still render label and disconnected state.
-	if !strings.Contains(result, "2. personal (disconnected)") {
+	if !strings.Contains(result, "2. personal (disconnected, mail=none)") {
 		t.Errorf("expected disconnected account line without email, got:\n%s", result)
 	}
 }
@@ -597,10 +597,10 @@ func TestFormatStatusText_WithUPN(t *testing.T) {
 
 	result := FormatStatusText(status)
 
-	if !strings.Contains(result, "default: authenticated — alice@contoso.com (browser)") {
+	if !strings.Contains(result, "default: authenticated — alice@contoso.com (browser, mail=none)") {
 		t.Errorf("expected default line with UPN and auth_method, got:\n%s", result)
 	}
-	if !strings.Contains(result, "work: disconnected — bob@contoso.com (device_code)") {
+	if !strings.Contains(result, "work: disconnected — bob@contoso.com (device_code, mail=none)") {
 		t.Errorf("expected work line with UPN and auth_method, got:\n%s", result)
 	}
 }

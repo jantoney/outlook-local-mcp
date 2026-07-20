@@ -96,6 +96,39 @@ func TestScopesForProfile(t *testing.T) {
 	}
 }
 
+// TestScopesForMailPolicy verifies OAuth scopes are the least broad set needed
+// by an own-mail action policy and never substitute for local authorization.
+func TestScopesForMailPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		policy MailActionPolicy
+		want   []string
+	}{
+		{"disabled", MailActionPolicy{}, []string{"User.Read", "Calendars.ReadWrite"}},
+		{"read", MailActionPolicy{Read: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.Read"}},
+		{"draft", MailActionPolicy{Draft: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite"}},
+		{"filing", MailActionPolicy{Archive: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite"}},
+		{"send", MailActionPolicy{Send: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite", "Mail.Send"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := ScopesForMailPolicy(test.policy)
+			if len(got) != len(test.want) {
+				t.Fatalf("ScopesForMailPolicy(%+v) = %v, want %v", test.policy, got, test.want)
+			}
+			for index := range test.want {
+				if got[index] != test.want[index] {
+					t.Fatalf("ScopesForMailPolicy(%+v) = %v, want %v", test.policy, got, test.want)
+				}
+			}
+		})
+	}
+}
+
 func TestMailProfileFromConfig(t *testing.T) {
 	t.Parallel()
 

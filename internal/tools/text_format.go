@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/desek/outlook-local-mcp/internal/auth"
 )
 
 // FormatEventsText formats a slice of serialized summary event maps into a
@@ -665,14 +667,12 @@ func FormatAccountsText(accounts []map[string]any) string {
 		}
 		email, _ := a["email"].(string)
 		method, _ := a["auth_method"].(string)
-		profile, _ := a["mail_profile"].(string)
+		policy, _ := a["mail_policy"].(auth.MailActionPolicy)
 		parenthetical := state
 		if method != "" {
 			parenthetical = state + ", " + method
 		}
-		if profile != "" {
-			parenthetical += ", " + profile
-		}
+		parenthetical += ", mail=" + formatMailPolicyText(policy)
 		if email != "" {
 			fmt.Fprintf(&b, "%d. %s — %s (%s)\n", i+1, label, email, parenthetical)
 		} else {
@@ -754,9 +754,7 @@ func FormatStatusText(status statusResponse) string {
 			if acct.AuthMethod != "" {
 				details = append(details, acct.AuthMethod)
 			}
-			if acct.MailProfile != "" {
-				details = append(details, acct.MailProfile)
-			}
+			details = append(details, "mail="+formatMailPolicyText(acct.MailPolicy))
 			detailText := strings.Join(details, ", ")
 			switch {
 			case acct.UPN != "" && detailText != "":

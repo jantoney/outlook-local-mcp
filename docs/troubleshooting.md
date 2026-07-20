@@ -144,17 +144,17 @@ Common failure modes and remediation steps for `outlook-local-mcp`.
 
 ---
 
-## Insufficient mail profile
+## Insufficient mail capability
 
-**Symptom:** A mail verb reports that the selected account's profile is insufficient.
+**Symptom:** A mail verb reports that the selected account's own-mail policy disables the required capability.
 
-**Cause:** All mail verbs are discoverable, but the selected account does not have the minimum cumulative profile for that operation.
+**Cause:** All mail verbs are discoverable, but the selected account's exact action switch is off. OAuth consent does not override this local policy.
 
 **Remediation:**
 
-1. Check profiles with `{tool: "account", args: {operation: "list"}}`.
-2. Change only the intended account with `{tool: "account", args: {operation: "set_mail_profile", label: "work", mail_profile: "mail_read"}}` (or `mail_manage` / `mail_send`).
-3. Reconnect it with `account.login` to consent to the new scope set.
+1. Check the action matrix with `{tool: "account", args: {operation: "list"}}`.
+2. Change only the intended account, for example `{tool: "account", args: {operation: "set_mail_policy", label: "work", read: true, draft: true}}`.
+3. If the response says OAuth scopes changed, reconnect it with `account.login`. Same-scope changes apply without disconnecting.
 
 ---
 
@@ -162,23 +162,23 @@ Common failure modes and remediation steps for `outlook-local-mcp`.
 
 **Symptom:** `mail.add_attachment` reports that local attachment upload is disabled or the path is outside configured roots.
 
-**Cause:** `OUTLOOK_MCP_ATTACHMENT_ROOTS` is empty, the account is below `mail_manage`, or canonical path resolution places the file outside every allowed root.
+**Cause:** `OUTLOOK_MCP_ATTACHMENT_ROOTS` is empty, the account's `draft` capability is off, or canonical path resolution places the file outside every allowed root.
 
 **Remediation:**
 
 1. Configure `OUTLOOK_MCP_ATTACHMENT_ROOTS` as an OS path-list of the smallest directories that contain intended files, then restart.
-2. Confirm the selected account uses `mail_manage` or `mail_send`.
+2. Confirm the selected account's own-mail policy enables `draft`.
 3. Use a regular file under an allowed root; traversal and symlink/junction escapes are intentionally rejected.
 
 ---
 
 ## Revoke Microsoft app consent
 
-**Symptom:** An account was lowered from `mail_send` or `mail_manage`, but Microsoft still records the old delegated consent.
+**Symptom:** Mail actions were disabled locally, but Microsoft still records earlier delegated consent.
 
-**Cause:** `account.set_mail_profile` clears local tokens and enforces the lower capability immediately, but it cannot revoke a grant stored by Microsoft.
+**Cause:** `account.set_mail_policy` enforces the local matrix immediately and clears local tokens when required scopes change, but it cannot revoke a grant stored by Microsoft.
 
-**Remediation:** Remove the application's consent from the personal Microsoft account privacy/app permissions page, or have an Entra administrator revoke the enterprise application's user/admin consent. Then reconnect the account and consent only to the new profile scopes.
+**Remediation:** Remove the application's consent from the personal Microsoft account privacy/app permissions page, or have an Entra administrator revoke the enterprise application's user/admin consent. Then reconnect the account and consent only to the scopes required by the current action policy.
 
 ---
 

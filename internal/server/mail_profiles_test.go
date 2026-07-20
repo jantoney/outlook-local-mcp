@@ -10,19 +10,19 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
-// TestBuildMailVerbsIsStaticAndDeclaresProfiles verifies discovery does not
-// depend on global default flags and every non-help verb advertises its guard.
-func TestBuildMailVerbsIsStaticAndDeclaresProfiles(t *testing.T) {
+// TestBuildMailVerbsIsStaticAndDeclaresCapabilities verifies discovery does
+// not depend on global defaults and every non-help verb advertises an exact guard.
+func TestBuildMailVerbsIsStaticAndDeclaresCapabilities(t *testing.T) {
 	identity := func(handler mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc { return handler }
 	verbs, _ := buildMailVerbs(mailVerbsConfig{cfg: config.Config{}, authMW: identity, accountResolverMW: identity})
-	want := map[string]auth.MailProfile{
-		"list_folders": auth.MailProfileRead, "list_messages": auth.MailProfileRead,
-		"get_message": auth.MailProfileRead, "search_messages": auth.MailProfileRead,
-		"get_conversation": auth.MailProfileRead, "list_attachments": auth.MailProfileRead,
-		"get_attachment": auth.MailProfileRead, "create_draft": auth.MailProfileManage,
-		"create_reply_draft": auth.MailProfileManage, "create_forward_draft": auth.MailProfileManage,
-		"update_draft": auth.MailProfileManage, "delete_draft": auth.MailProfileManage,
-		"add_attachment": auth.MailProfileManage, "send_draft": auth.MailProfileSend,
+	want := map[string]auth.MailCapability{
+		"list_folders": auth.MailCapabilityRead, "list_messages": auth.MailCapabilityRead,
+		"get_message": auth.MailCapabilityRead, "search_messages": auth.MailCapabilityRead,
+		"get_conversation": auth.MailCapabilityRead, "list_attachments": auth.MailCapabilityRead,
+		"get_attachment": auth.MailCapabilityRead, "create_draft": auth.MailCapabilityDraft,
+		"create_reply_draft": auth.MailCapabilityDraft, "create_forward_draft": auth.MailCapabilityDraft,
+		"update_draft": auth.MailCapabilityDraft, "delete_draft": auth.MailCapabilityDraft,
+		"add_attachment": auth.MailCapabilityDraft, "send_draft": auth.MailCapabilitySend,
 	}
 	seen := make(map[string]bool)
 	for _, verb := range verbs {
@@ -30,8 +30,8 @@ func TestBuildMailVerbsIsStaticAndDeclaresProfiles(t *testing.T) {
 			continue
 		}
 		seen[verb.Name] = true
-		if verb.MinimumProfile != want[verb.Name].String() {
-			t.Errorf("%s minimum profile = %q, want %q", verb.Name, verb.MinimumProfile, want[verb.Name])
+		if verb.RequiredCapability != string(want[verb.Name]) {
+			t.Errorf("%s required capability = %q, want %q", verb.Name, verb.RequiredCapability, want[verb.Name])
 		}
 	}
 	if len(seen) != len(want) {

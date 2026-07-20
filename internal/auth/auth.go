@@ -73,17 +73,7 @@ func Scopes(cfg config.Config) []string {
 // ScopesForProfile returns the exact delegated Graph scopes requested for one
 // account. The returned slice is newly allocated and safe for callers to keep.
 func ScopesForProfile(profile MailProfile) []string {
-	scopes := []string{userReadScope, calendarScope}
-	switch profile {
-	case MailProfileRead:
-		return append(scopes, mailScope)
-	case MailProfileManage:
-		return append(scopes, mailReadWriteScope)
-	case MailProfileSend:
-		return append(scopes, mailReadWriteScope, mailSendScope)
-	default:
-		return scopes
-	}
+	return ScopesForMailPolicy(MailPolicyFromProfile(profile))
 }
 
 // Authenticator is the interface for performing explicit authentication and

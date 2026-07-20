@@ -164,6 +164,10 @@ func restoreAccounts(
 		slog.Warn("failed to migrate account identities", "path", accountsPath, "error", err)
 		return 0, 0
 	}
+	if err := MigrateAccountMailPolicies(accountsPath, defaultProfile); err != nil {
+		slog.Warn("failed to migrate account mail policies", "path", accountsPath, "error", err)
+		return 0, 0
+	}
 	accounts, err := LoadAccounts(accountsPath)
 	if err != nil {
 		slog.Warn("failed to load accounts file", "path", accountsPath, "error", err)
@@ -177,29 +181,15 @@ func restoreAccounts(
 
 	slog.Info("restoring accounts from accounts file", "path", accountsPath, "count", total)
 
-	profilesChanged := false
-	for index, acct := range accounts {
-		profile := defaultProfile
-		if acct.MailProfile != "" {
-			parsed, parseErr := ParseMailProfile(acct.MailProfile)
-			if parseErr != nil {
-				slog.Warn("invalid persisted mail profile; using configured default", "account", acct.Label, "mail_profile", acct.MailProfile)
-			} else {
-				profile = parsed
-			}
+	for _, acct := range accounts {
+		policy := MailPolicyFromProfile(defaultProfile)
+		if acct.MailPolicy != nil {
+			policy = *acct.MailPolicy
 		}
-		if accounts[index].MailProfile != profile.String() {
-			accounts[index].MailProfile = profile.String()
-			profilesChanged = true
-		}
+		profile := LegacyProfileForPolicy(policy)
 		if restoreOne(acct, cacheNameBase, authRecordDir, registry, credFactory,
 			clientFactoryForProfile(profile), scopesForProfile(profile), profile, tokenStorage) {
 			restored++
-		}
-	}
-	if profilesChanged {
-		if err := SaveAccounts(accountsPath, accounts); err != nil {
-			slog.Warn("failed to persist derived account mail profiles", "path", accountsPath, "error", err)
 		}
 	}
 
@@ -282,7 +272,11 @@ func restoreOne(
 		AuthRecordPath: authRecordPath,
 		CacheName:      cacheName,
 		MailProfile:    profile,
+		MailPolicy:     MailPolicyFromProfile(profile),
 		Scopes:         append([]string(nil), scopes...),
+	}
+	if acct.MailPolicy != nil {
+		entry.MailPolicy = *acct.MailPolicy
 	}
 
 	// Populate Email from the persisted UPN so that downstream surfaces

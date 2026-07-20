@@ -51,7 +51,11 @@ type AccountEntry struct {
 	AuthMethod string
 
 	// MailProfile controls the mail scopes and verbs available to this account.
+	// It is retained as a transition input; runtime authorization uses MailPolicy.
 	MailProfile MailProfile
+
+	// MailPolicy controls the exact own-mail actions available to this account.
+	MailPolicy MailActionPolicy
 
 	// Scopes is the active delegated OAuth scope set used by this account's
 	// current Graph client. It is nil while the account is disconnected.

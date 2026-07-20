@@ -105,8 +105,8 @@ type statusAccount struct {
 	// account was registered without a persisted method.
 	AuthMethod string `json:"auth_method"`
 
-	// MailProfile is the account's active cumulative capability profile.
-	MailProfile string `json:"mail_profile"`
+	// MailPolicy is the account's active independent own-mail action matrix.
+	MailPolicy auth.MailActionPolicy `json:"mail_policy"`
 }
 
 // statusConfig contains all six configuration groups exposed by the status
@@ -289,7 +289,7 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 				Authenticated: entry.Authenticated,
 				UPN:           entry.Email,
 				AuthMethod:    entry.AuthMethod,
-				MailProfile:   entry.MailProfile.String(),
+				MailPolicy:    entry.MailPolicy,
 			})
 		}
 
