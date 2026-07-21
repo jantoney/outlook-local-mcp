@@ -31,8 +31,9 @@ const (
 )
 
 // CalendarAlias is one persisted account-scoped shared-calendar selector. Its
-// owner, kind, view, mounted ID, and resource ID are immutable after creation;
-// only Alias and Profile may change through explicit lifecycle operations.
+// owner, kind, and view are immutable after creation. Alias and Profile may
+// change independently; explicit mounted-calendar reselection replaces both
+// the mounted ID and resource identity so references cannot cross selections.
 type CalendarAlias struct {
 	// ResourceID is the immutable local provenance identity.
 	ResourceID ResourceID `json:"resource_id"`
@@ -131,12 +132,18 @@ func (a CalendarAlias) WithProfile(profile CalendarProfile) (CalendarAlias, erro
 }
 
 // ReselectMounted returns a copy with a newly human-selected mounted calendar
-// ID while preserving resource identity, owner, kind, view, alias, and policy.
-// It rejects owner-primary aliases and empty IDs.
+// ID and a fresh resource identity while preserving owner, kind, view, alias,
+// and policy. It rejects owner-primary aliases and empty IDs, and returns an
+// error when secure resource-identity generation fails.
 func (a CalendarAlias) ReselectMounted(mountedID string) (CalendarAlias, error) {
 	if a.Kind != CalendarKindMounted {
 		return CalendarAlias{}, fmt.Errorf("only mounted calendar aliases can be reselected")
 	}
+	id, err := NewResourceID()
+	if err != nil {
+		return CalendarAlias{}, err
+	}
+	a.ResourceID = id
 	a.MountedCalendarID = mountedID
 	if err := a.Validate(); err != nil {
 		return CalendarAlias{}, err

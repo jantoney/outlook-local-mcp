@@ -28,12 +28,15 @@ func getCalendarEvent(ctx context.Context, target calendarReadTarget, eventID st
 // createCalendarEvent posts one event to the exact own or mounted collection.
 func createCalendarEvent(ctx context.Context, target calendarReadTarget, ownCalendarID string, event models.Eventable) (models.Eventable, error) {
 	if target.isMounted() {
-		return target.root.Calendars().ByCalendarId(target.target.MountedCalendarID).Events().Post(ctx, event, nil)
+		config := &users.ItemCalendarsItemEventsRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		return target.root.Calendars().ByCalendarId(target.target.MountedCalendarID).Events().Post(ctx, event, config)
 	}
 	if ownCalendarID != "" {
-		return target.root.Calendars().ByCalendarId(ownCalendarID).Events().Post(ctx, event, nil)
+		config := &users.ItemCalendarsItemEventsRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		return target.root.Calendars().ByCalendarId(ownCalendarID).Events().Post(ctx, event, config)
 	}
-	return target.root.Events().Post(ctx, event, nil)
+	config := &users.ItemEventsRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+	return target.root.Events().Post(ctx, event, config)
 }
 
 // patchCalendarEvent updates one event without changing its authorized route.
@@ -47,9 +50,11 @@ func patchCalendarEvent(ctx context.Context, target calendarReadTarget, eventID 
 // deleteCalendarEvent deletes one event without changing its authorized route.
 func deleteCalendarEvent(ctx context.Context, target calendarReadTarget, eventID string) error {
 	if target.isMounted() {
-		return target.root.Calendars().ByCalendarId(target.target.MountedCalendarID).Events().ByEventId(eventID).Delete(ctx, nil)
+		config := &users.ItemCalendarsItemEventsEventItemRequestBuilderDeleteRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		return target.root.Calendars().ByCalendarId(target.target.MountedCalendarID).Events().ByEventId(eventID).Delete(ctx, config)
 	}
-	return target.root.Events().ByEventId(eventID).Delete(ctx, nil)
+	config := &users.ItemEventsEventItemRequestBuilderDeleteRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+	return target.root.Events().ByEventId(eventID).Delete(ctx, config)
 }
 
 // requireMountedNonMeeting accepts only events Graph explicitly classifies as

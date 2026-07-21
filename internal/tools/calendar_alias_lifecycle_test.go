@@ -16,7 +16,6 @@ import (
 // TestCalendarAliasLifecycleIsAccountScoped verifies alias reuse across
 // accounts, rename identity preservation, removal, and recreate invalidation.
 func TestCalendarAliasLifecycleIsAccountScoped(t *testing.T) {
-	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "accounts.json")
 	if err := auth.SaveAccounts(path, []auth.AccountConfig{
@@ -84,7 +83,6 @@ func TestCalendarAliasLifecycleIsAccountScoped(t *testing.T) {
 // TestMountedCalendarRequiresFreshExplicitSelection verifies creation filters
 // discovery by owner and refuses an unconfirmed or absent mounted ID.
 func TestMountedCalendarRequiresFreshExplicitSelection(t *testing.T) {
-	t.Parallel()
 
 	client, server := newTestGraphClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.EscapedPath(), "/calendars") {
@@ -138,7 +136,6 @@ func TestMountedCalendarRequiresFreshExplicitSelection(t *testing.T) {
 // TestCalendarAliasCompatibilityDeniedBeforeGraph verifies owner-primary manage
 // and personal owner-view configuration fail without a discovery request.
 func TestCalendarAliasCompatibilityDeniedBeforeGraph(t *testing.T) {
-	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "accounts.json")
 	if err := auth.SaveAccounts(path, []auth.AccountConfig{{Label: "personal"}}); err != nil {

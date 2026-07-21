@@ -294,36 +294,36 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 			"endpoint", routeEndpoint,
 			"status", "ok")
 
-		// Paginate through results using PageIterator with max_results cap.
+		// Paginate with a max_results cap. Shared continuations remain pinned
+		// to the authorized owner-primary or mounted collection.
 		events := make([]map[string]any, 0, maxResults)
-		pageIterator, err := msgraphcore.NewPageIterator[models.Eventable](
-			resp,
-			client.GetAdapter(),
-			models.CreateEventCollectionResponseFromDiscriminatorValue,
-		)
-		if err != nil {
-			logger.Error("page iterator creation failed",
-				"error", err.Error(),
-				"duration", time.Since(start))
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create page iterator: %s", err.Error())), nil
-		}
-
-		// Set Prefer header on subsequent page requests when timezone is specified.
-		if timezone != "" {
-			headers := abstractions.NewRequestHeaders()
-			headers.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
-			pageIterator.SetHeaders(headers)
-		}
-
-		err = pageIterator.Iterate(ctx, func(event models.Eventable) bool {
+		appendEvent := func(event models.Eventable) bool {
 			if outputMode == "raw" {
 				events = append(events, graph.SerializeEvent(event, provenancePropertyID))
 			} else {
 				events = append(events, graph.SerializeSummaryEvent(event, provenancePropertyID))
 			}
-			// Stop iteration once max_results events are collected.
 			return len(events) < maxResults
-		})
+		}
+		var continuationHeaders *abstractions.RequestHeaders
+		if timezone != "" {
+			continuationHeaders = abstractions.NewRequestHeaders()
+			continuationHeaders.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
+		}
+		if target.isShared() {
+			err = iteratePinnedSharedEvents(ctx, resp, client.GetAdapter(), sharedCalendarViewPath(target), continuationHeaders, appendEvent)
+		} else {
+			var pageIterator *msgraphcore.PageIterator[models.Eventable]
+			pageIterator, err = msgraphcore.NewPageIterator[models.Eventable](
+				resp, client.GetAdapter(), models.CreateEventCollectionResponseFromDiscriminatorValue,
+			)
+			if err == nil {
+				if continuationHeaders != nil {
+					pageIterator.SetHeaders(continuationHeaders)
+				}
+				err = pageIterator.Iterate(ctx, appendEvent)
+			}
+		}
 		if err != nil {
 			logger.Error("pagination failed",
 				"error", err.Error(),

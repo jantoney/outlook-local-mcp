@@ -113,7 +113,8 @@ func NewHandleCreateForwardDraft(retryCfg graph.RetryConfig, timeout time.Durati
 		}
 
 		// createForward is non-idempotent and is attempted exactly once.
-		created, err := target.root.Messages().ByMessageId(messageID).CreateForward().Post(timeoutCtx, body, nil)
+		config := &users.ItemMessagesItemCreateForwardRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		created, err := target.root.Messages().ByMessageId(messageID).CreateForward().Post(timeoutCtx, body, config)
 		if err != nil {
 			logger.ErrorContext(ctx, "create forward draft failed", "error", graph.FormatGraphError(err))
 			return mcp.NewToolResultError(draftCreateError(target, err)), nil

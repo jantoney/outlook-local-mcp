@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestAttachmentPathWithinRoot verifies allowlisted regular files are accepted.
 func TestAttachmentPathWithinRoot(t *testing.T) {
 	t.Parallel()
 
@@ -23,6 +24,7 @@ func TestAttachmentPathWithinRoot(t *testing.T) {
 	}
 }
 
+// TestAttachmentPathOutsideRootRejected verifies paths outside every root fail.
 func TestAttachmentPathOutsideRootRejected(t *testing.T) {
 	t.Parallel()
 
@@ -36,6 +38,7 @@ func TestAttachmentPathOutsideRootRejected(t *testing.T) {
 	}
 }
 
+// TestAttachmentPathDisabledWithoutRoots verifies local-file access fails closed.
 func TestAttachmentPathDisabledWithoutRoots(t *testing.T) {
 	t.Parallel()
 

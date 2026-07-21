@@ -74,9 +74,7 @@ func TestPermanentDeleteUsesDistinctExactTargetRoute(t *testing.T) {
 			}}, nil
 		},
 		delete: func(ctx context.Context, target mailReadTarget, messageID string) error {
-			timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
-			defer cancel()
-			return target.root.Messages().ByMessageId(messageID).PermanentDelete().Post(timeoutCtx, nil)
+			return permanentlyDeleteMessageOnce(ctx, target, messageID, time.Second)
 		},
 	}
 	request := mcp.CallToolRequest{}

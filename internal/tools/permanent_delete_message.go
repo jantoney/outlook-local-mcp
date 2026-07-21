@@ -11,6 +11,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // permanentDeleteSummary is the immutable message snapshot presented for
@@ -38,12 +39,20 @@ func NewHandlePermanentDeleteMessage(retryCfg graph.RetryConfig, timeout time.Du
 		},
 		elicit: defaultSendDraftElicit,
 		delete: func(ctx context.Context, target mailReadTarget, messageID string) error {
-			timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
-			defer cancel()
-			return target.root.Messages().ByMessageId(messageID).PermanentDelete().Post(timeoutCtx, nil)
+			return permanentlyDeleteMessageOnce(ctx, target, messageID, timeout)
 		},
 	}
 	return handlePermanentDeleteMessage(state)
+}
+
+// permanentlyDeleteMessageOnce permanently deletes messageID through target
+// within timeout. It returns the single Graph attempt's error and disables SDK
+// retries so a transient response cannot trigger duplicate destructive traffic.
+func permanentlyDeleteMessageOnce(ctx context.Context, target mailReadTarget, messageID string, timeout time.Duration) error {
+	timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
+	defer cancel()
+	config := &users.ItemMessagesItemPermanentDeleteRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+	return target.root.Messages().ByMessageId(messageID).PermanentDelete().Post(timeoutCtx, config)
 }
 
 // handlePermanentDeleteMessage implements the accept-only, version-bound,

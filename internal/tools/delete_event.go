@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/desek/outlook-local-mcp/internal/validate"
@@ -55,7 +56,8 @@ func NewDeleteEventTool() mcp.Tool {
 // from the request context at invocation time.
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retry configuration for the mounted classification read;
+//     the destructive delete itself is attempted once.
 //   - timeout: the maximum duration for the Graph API call.
 //
 // Returns a closure matching the MCP tool handler function signature. The
@@ -108,19 +110,20 @@ func HandleDeleteEvent(retryCfg graph.RetryConfig, timeout time.Duration) func(c
 
 		deleteCtx, deleteCancel := graph.WithTimeout(ctx, timeout)
 		defer deleteCancel()
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			return deleteCalendarEvent(deleteCtx, target, eventID)
-		})
+		if deleteCtx.Err() != nil {
+			return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
+		}
+		err = deleteCalendarEvent(deleteCtx, target, eventID)
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
+			if calendarMutationOutcomeUncertain(err) {
+				auth.RecordAuditOutcome(ctx, "uncertain")
+				return mcp.NewToolResultError(ambiguousCalendarMutationError("Event deletion", "Inspect the target calendar to confirm whether the event remains and whether cancellation notices were issued before another attempt.", err)), nil
 			}
+			auth.RecordAuditOutcome(ctx, "denied")
 			logger.ErrorContext(ctx, "delete event failed", "event_id", eventID, "error", graph.FormatGraphError(err))
 			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
+		auth.RecordAuditOutcome(ctx, "accepted")
 
 		logger.InfoContext(ctx, "event deleted", "event_id", eventID)
 

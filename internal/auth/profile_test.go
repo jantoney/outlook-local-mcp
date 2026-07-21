@@ -6,6 +6,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/config"
 )
 
+// TestParseMailProfile verifies every supported legacy profile parses exactly.
 func TestParseMailProfile(t *testing.T) {
 	t.Parallel()
 
@@ -33,6 +34,7 @@ func TestParseMailProfile(t *testing.T) {
 	}
 }
 
+// TestParseMailProfileRejectsUnknown verifies unsupported profile names fail.
 func TestParseMailProfileRejectsUnknown(t *testing.T) {
 	t.Parallel()
 
@@ -41,6 +43,7 @@ func TestParseMailProfileRejectsUnknown(t *testing.T) {
 	}
 }
 
+// TestMailProfileAllows verifies the legacy cumulative capability ordering.
 func TestMailProfileAllows(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +69,7 @@ func TestMailProfileAllows(t *testing.T) {
 	}
 }
 
+// TestScopesForProfile verifies each legacy profile's delegated scope union.
 func TestScopesForProfile(t *testing.T) {
 	t.Parallel()
 
@@ -129,6 +133,7 @@ func TestScopesForMailPolicy(t *testing.T) {
 	}
 }
 
+// TestMailProfileFromConfig verifies legacy feature flags map deterministically.
 func TestMailProfileFromConfig(t *testing.T) {
 	t.Parallel()
 

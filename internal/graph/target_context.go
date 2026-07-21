@@ -34,6 +34,7 @@ func (target RoutedTarget) Revalidate() error {
 	return nil
 }
 
+// routedTargetKeyType prevents collisions with caller-owned context keys.
 type routedTargetKeyType struct{}
 
 var routedTargetKey routedTargetKeyType

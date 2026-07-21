@@ -23,7 +23,8 @@ func moveMessageToSemanticDestination(ctx context.Context, target mailReadTarget
 	body.SetDestinationId(&destinationID)
 	timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 	defer cancel()
-	moved, err := target.root.Messages().ByMessageId(sourceID).Move().Post(timeoutCtx, body, nil)
+	config := &users.ItemMessagesItemMoveRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+	moved, err := target.root.Messages().ByMessageId(sourceID).Move().Post(timeoutCtx, body, config)
 	if err != nil {
 		return mcp.NewToolResultError(moveMutationError(target, err)), nil
 	}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
-	msgraphcore "github.com/microsoftgraph/msgraph-sdk-go-core"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 )
 
@@ -40,14 +39,8 @@ func discoverMountedCalendarCandidates(ctx context.Context, entry *auth.AccountE
 	if err != nil {
 		return nil, fmt.Errorf("discover mounted calendars: %w", err)
 	}
-	iterator, err := msgraphcore.NewPageIterator[models.Calendarable](
-		response, entry.Client.GetAdapter(), models.CreateCalendarCollectionResponseFromDiscriminatorValue,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create calendar discovery page iterator: %w", err)
-	}
 	candidates := make([]mountedCalendarCandidate, 0)
-	if err := iterator.Iterate(timeoutCtx, func(calendar models.Calendarable) bool {
+	if err := iteratePinnedMountedCalendars(timeoutCtx, response, entry.Client.GetAdapter(), func(calendar models.Calendarable) bool {
 		calendarOwner := ""
 		if value := calendar.GetOwner(); value != nil {
 			calendarOwner = graph.SafeStr(value.GetAddress())

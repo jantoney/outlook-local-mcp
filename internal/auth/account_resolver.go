@@ -145,7 +145,7 @@ func (s *accountResolverState) disconnectedAdvisory(entry *AccountEntry, request
 	}
 
 	authenticated := s.registry.ListAuthenticated()
-	if len(authenticated) != 1 || authenticated[0] != entry {
+	if len(authenticated) != 1 || authenticated[0].Label != entry.Label {
 		return ""
 	}
 

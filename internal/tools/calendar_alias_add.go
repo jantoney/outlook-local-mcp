@@ -60,6 +60,9 @@ func HandleDiscoverCalendarAliases(registry *auth.AccountRegistry, retryCfg grap
 // account-scoped owner-primary or explicitly selected mounted calendar alias.
 func HandleAddCalendarAlias(registry *auth.AccountRegistry, accountsPath string, retryCfg graph.RetryConfig, timeout time.Duration) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		label, aliasName, owner, kind, profile, entry, err := calendarAliasCreateArguments(registry, request)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil

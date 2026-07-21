@@ -17,6 +17,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // NewCreateDraftTool creates the MCP tool definition for mail_create_draft.
@@ -161,7 +162,8 @@ func NewHandleCreateDraft(_ graph.RetryConfig, timeout time.Duration, provenance
 
 		// Draft creation is non-idempotent. A transient or ambiguous response is
 		// surfaced for recovery and never retried automatically.
-		created, err := target.root.Messages().Post(timeoutCtx, msg, nil)
+		config := &users.ItemMessagesRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		created, err := target.root.Messages().Post(timeoutCtx, msg, config)
 		if err != nil {
 			logger.ErrorContext(ctx, "create draft failed", "error", graph.FormatGraphError(err))
 			return mcp.NewToolResultError(draftCreateError(target, err)), nil

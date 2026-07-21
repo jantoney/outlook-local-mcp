@@ -12,11 +12,10 @@ import (
 
 // replaceMailAliases persists and publishes one account's shared-mail family
 // as one serialized mutation. Authentication is cleared only when the complete
-// account-wide delegated scope union changes.
+// account-wide delegated scope union changes. The caller must hold
+// accountPolicyMutationMu from before it reads entry until this function
+// returns.
 func replaceMailAliases(registry *auth.AccountRegistry, accountsPath string, entry *auth.AccountEntry, aliases []resource.MailAlias) (bool, error) {
-	accountPolicyMutationMu.Lock()
-	defer accountPolicyMutationMu.Unlock()
-
 	oldScopes := auth.ScopesForAccountEntry(entry)
 	newScopes := auth.OAuthScopeUnion(
 		auth.ScopesForMailPolicy(entry.MailPolicy),

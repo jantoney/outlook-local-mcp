@@ -303,7 +303,7 @@ If `accounts.json` has a single entry whose `client_id` and `tenant_id` match th
 
 If a configured mounted calendar ID is missing or Graph rejects its route, list, search, and get return reselection guidance after the one exact mounted request. The server does not retry through the owner, default `/me` calendar, display-name search, or another mounted ID. This protects mailbox-view-scoped event identifiers from being replayed against the wrong mount.
 
-**Remedy:** Call `account.discover_calendar_aliases` with the same account and owner. Have the user select the intended calendar, then call `account.reselect_calendar_alias` with the exact `mounted_calendar_id` and `confirm_mounted_selection=true`. Reselection preserves the alias's immutable resource identity; changing the owner or kind requires remove and recreate.
+**Remedy:** Call `account.discover_calendar_aliases` with the same account and owner. Have the user select the intended calendar, then call `account.reselect_calendar_alias` with the exact `mounted_calendar_id` and `confirm_mounted_selection=true`. Reselection preserves the human alias and policy but creates a new resource identity, so obtain fresh event references afterward. Changing the owner or kind requires remove and recreate.
 
 ---
 

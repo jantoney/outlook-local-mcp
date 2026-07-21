@@ -15,6 +15,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // sharedSendAttachment is one canonical attachment identity in a complete
@@ -52,12 +53,20 @@ func NewHandleSharedSendDraft(retryCfg graph.RetryConfig, timeout time.Duration,
 		},
 		elicit: defaultSendDraftElicit,
 		send: func(ctx context.Context, target mailReadTarget, draftID string) error {
-			timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
-			defer cancel()
-			return target.root.Messages().ByMessageId(draftID).Send().Post(timeoutCtx, nil)
+			return sendSharedDraftOnce(ctx, target, draftID, timeout)
 		},
 	}
 	return handleSharedSendDraft(state, codec)
+}
+
+// sendSharedDraftOnce submits draftID through target's immutable owner route
+// within timeout and suppresses Kiota's transparent transient-status retries.
+// It returns the single Graph attempt's error and has no local side effects.
+func sendSharedDraftOnce(ctx context.Context, target mailReadTarget, draftID string, timeout time.Duration) error {
+	timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
+	defer cancel()
+	config := &users.ItemMessagesItemSendRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+	return target.root.Messages().ByMessageId(draftID).Send().Post(timeoutCtx, config)
 }
 
 // handleSharedSendDraft enforces the single-use review sequence using the
@@ -239,7 +248,8 @@ func loadAllSharedSendAttachments(ctx context.Context, target mailReadTarget, re
 // configured owner and draft attachment collection route.
 func validateSharedAttachmentNextLink(raw, owner, draftID string) error {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Hostname(), "graph.microsoft.com") ||
+		(parsed.Port() != "" && parsed.Port() != "443") || parsed.User != nil {
 		return fmt.Errorf("shared send attachment pagination returned an invalid next link")
 	}
 	want := "/v1.0/users/" + owner + "/messages/" + draftID + "/attachments"

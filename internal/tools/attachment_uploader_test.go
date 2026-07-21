@@ -14,6 +14,8 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/graph"
 )
 
+// TestUploadAttachmentRangesUsesSequentialRangesWithoutAuthorization verifies
+// upload URLs receive contiguous chunks without a Graph authorization header.
 func TestUploadAttachmentRangesUsesSequentialRangesWithoutAuthorization(t *testing.T) {
 	t.Parallel()
 

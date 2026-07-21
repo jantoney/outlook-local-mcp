@@ -211,6 +211,9 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		refreshed, _ := registry.Get(label)
 		if refreshed != nil {
 			auth.EnsureEmailAndPersistUPN(ctx, refreshed, cfg.AccountsPath)
+			if refreshed.Email != "" {
+				_ = registry.PublishEmail(refreshed.Label, refreshed.AccountID, refreshed.Email)
+			}
 		}
 
 		upn := ""

@@ -5,11 +5,13 @@ import (
 	"sync"
 )
 
+// auditOutcomeRecorder synchronizes one request's evolving audit outcome.
 type auditOutcomeRecorder struct {
 	mu      sync.Mutex
 	outcome string
 }
 
+// auditOutcomeKeyType prevents collisions with context keys owned by callers.
 type auditOutcomeKeyType struct{}
 
 var auditOutcomeKey auditOutcomeKeyType

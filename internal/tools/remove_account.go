@@ -73,6 +73,8 @@ func HandleRemoveAccount(registry *auth.AccountRegistry, accountsPath string) fu
 		}
 
 		logger.Debug("tool called", "label", label)
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
 
 		// Capture the cache partition name and UPN before removing from the
 		// registry so we can clear the persisted token cache after removal

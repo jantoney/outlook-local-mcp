@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/desek/outlook-local-mcp/internal/validate"
@@ -69,7 +70,8 @@ func NewRespondEventTool() mcp.Tool {
 // (boolean). When send_response is omitted, it defaults to true.
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retained for handler compatibility; RSVP action posts are
+//     attempted once so notification delivery is never duplicated blindly.
 //   - timeout: the maximum duration for the Graph API call.
 //
 // Returns a closure matching the MCP tool handler function signature. The
@@ -80,7 +82,7 @@ func NewRespondEventTool() mcp.Tool {
 // Side effects: calls POST /me/events/{id}/{accept|tentativelyAccept|decline}
 // on the Microsoft Graph API. Logs at debug level on entry, error level on
 // failure, and info level on success.
-func HandleRespondEvent(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func HandleRespondEvent(_ graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		if err := rejectSharedMeetingRoute(request); err != nil {
@@ -137,22 +139,20 @@ func HandleRespondEvent(retryCfg graph.RetryConfig, timeout time.Duration) func(
 			return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 		}
 
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			return postEventResponse(timeoutCtx, client, eventID, response, comment, sendResponse)
-		})
+		err = postEventResponse(timeoutCtx, client, eventID, response, comment, sendResponse)
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
+			if calendarMutationOutcomeUncertain(err) {
+				auth.RecordAuditOutcome(ctx, "uncertain")
+				return mcp.NewToolResultError(ambiguousCalendarMutationError("Meeting response", "Inspect the event's current response status and organizer messages before responding again.", err)), nil
 			}
+			auth.RecordAuditOutcome(ctx, "denied")
 			logger.ErrorContext(ctx, "respond to event failed",
 				"event_id", eventID,
 				"response", response,
 				"error", graph.FormatGraphError(err))
 			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
 		}
+		auth.RecordAuditOutcome(ctx, "accepted")
 
 		logger.InfoContext(ctx, "event response sent",
 			"event_id", eventID,
@@ -195,21 +195,24 @@ func postEventResponse(ctx context.Context, client *msgraphsdk.GraphServiceClien
 			body.SetComment(&comment)
 		}
 		body.SetSendResponse(&sendResponse)
-		return client.Me().Events().ByEventId(eventID).Accept().Post(ctx, body, nil)
+		config := &graphusers.ItemEventsItemAcceptRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		return client.Me().Events().ByEventId(eventID).Accept().Post(ctx, body, config)
 	case "tentative":
 		body := graphusers.NewItemEventsItemTentativelyAcceptPostRequestBody()
 		if comment != "" {
 			body.SetComment(&comment)
 		}
 		body.SetSendResponse(&sendResponse)
-		return client.Me().Events().ByEventId(eventID).TentativelyAccept().Post(ctx, body, nil)
+		config := &graphusers.ItemEventsItemTentativelyAcceptRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		return client.Me().Events().ByEventId(eventID).TentativelyAccept().Post(ctx, body, config)
 	case "decline":
 		body := graphusers.NewItemEventsItemDeclinePostRequestBody()
 		if comment != "" {
 			body.SetComment(&comment)
 		}
 		body.SetSendResponse(&sendResponse)
-		return client.Me().Events().ByEventId(eventID).Decline().Post(ctx, body, nil)
+		config := &graphusers.ItemEventsItemDeclineRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		return client.Me().Events().ByEventId(eventID).Decline().Post(ctx, body, config)
 	default:
 		return fmt.Errorf("invalid response type: %s", response)
 	}

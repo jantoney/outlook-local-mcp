@@ -302,19 +302,26 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 				Authenticated: true, MailProfile: p.mailProfile, MailPolicy: mailPolicy, Scopes: auth.ScopesForMailPolicy(mailPolicy),
 				TokenTenantContext: auth.TokenTenantContextFromAuthState(p.authMethod, p.authRecordPath),
 			}
+			accountPolicyMutationMu.Lock()
 			if err := registry.Add(entry); err != nil {
+				accountPolicyMutationMu.Unlock()
 				logger.Error("account registration failed", "label", label, "error", err.Error())
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
+			persistErr := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
 				AccountID: accountID, Label: label, ClientID: p.clientID, TenantID: p.tenantID, AuthMethod: p.authMethod,
 				MailPolicy: &mailPolicy,
-			}); err != nil {
-				logger.Warn("failed to persist account config", "label", label, "error", err.Error())
+			})
+			accountPolicyMutationMu.Unlock()
+			if persistErr != nil {
+				logger.Warn("failed to persist account config", "label", label, "error", persistErr.Error())
 			}
 			// Resolve UPN from /me and backfill accounts.json so entry.Email is
 			// populated immediately (CR-0056 FR-2/FR-3).
 			auth.EnsureEmailAndPersistUPN(ctx, entry, cfg.AccountsPath)
+			if entry.Email != "" {
+				_ = registry.PublishEmail(entry.Label, entry.AccountID, entry.Email)
+			}
 			result := map[string]any{"added": true, "label": label, "upn": entry.Email, "message": fmt.Sprintf("Account %q added and authenticated successfully.", label)}
 			data, err := json.Marshal(result)
 			if err != nil {
@@ -398,26 +405,33 @@ func (s *addAccountState) handleAddAccount(registry *auth.AccountRegistry, cfg c
 			TokenTenantContext: auth.TokenTenantContextFromAuthState(authMethod, authRecordPath),
 		}
 
+		accountPolicyMutationMu.Lock()
 		if err := registry.Add(entry); err != nil {
+			accountPolicyMutationMu.Unlock()
 			logger.Error("account registration failed", "label", label, "error", err.Error())
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		// Persist account identity configuration to accounts.json.
-		if err := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
+		persistErr := auth.AddAccountConfig(cfg.AccountsPath, auth.AccountConfig{
 			AccountID:  accountID,
 			Label:      label,
 			ClientID:   clientID,
 			TenantID:   tenantID,
 			AuthMethod: authMethod,
 			MailPolicy: &mailPolicy,
-		}); err != nil {
-			logger.Warn("failed to persist account config", "label", label, "error", err.Error())
+		})
+		accountPolicyMutationMu.Unlock()
+		if persistErr != nil {
+			logger.Warn("failed to persist account config", "label", label, "error", persistErr.Error())
 		}
 
 		// Resolve UPN from /me and backfill accounts.json so entry.Email is
 		// populated immediately (CR-0056 FR-2/FR-3).
 		auth.EnsureEmailAndPersistUPN(ctx, entry, cfg.AccountsPath)
+		if entry.Email != "" {
+			_ = registry.PublishEmail(entry.Label, entry.AccountID, entry.Email)
+		}
 
 		result := map[string]any{
 			"added":   true,

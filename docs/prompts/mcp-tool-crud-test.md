@@ -172,6 +172,7 @@ Call `{tool: "calendar", args: {operation: "create_event", ...}}` with:
 - **Pass:** Response is a plain text confirmation containing the event subject and an `ID:` line.
 - Save the returned **event ID** from the `ID:` line -- all subsequent steps depend on it.
 - Report the created event subject and ID.
+- If creation reports an uncertain outcome, do not retry blindly. Inspect the target calendar around the requested time and subject, then either recover the created ID or stop the run.
 
 ### Step 5 -- Provenance search (created event)
 
@@ -278,6 +279,7 @@ Call `{tool: "calendar", args: {operation: "get_event", event_id: "<saved event 
 Call `{tool: "calendar", args: {operation: "delete_event", event_id: "<saved event ID>"}}`.
 
 - **Pass:** Response is plain text containing `Event deleted:` and the event ID.
+- If deletion reports an uncertain outcome, do not repeat it. Inspect whether the event remains and whether cancellation notices were issued before continuing.
 
 ### Step 15 -- Get deleted event (expect failure)
 
@@ -358,6 +360,7 @@ Call `{tool: "calendar", args: {operation: "respond_event", account: "<attendee 
 
 - **Pass:** Response is plain text containing `Event tentatively accepted:` and the event ID.
 - **Fail:** If the call returns an error.
+- If the response reports an uncertain outcome, inspect the attendee's current response status and organizer messages; do not respond again blindly.
 
 ### Step 22 -- Verify attendee response from organizer
 
@@ -425,6 +428,7 @@ Call `{tool: "calendar", args: {operation: "respond_event", event_id: "<saved Te
 Call `{tool: "calendar", args: {operation: "cancel_meeting", event_id: "<saved Teams event ID>", comment: "Automated CRUD test cancellation"}}`.
 
 - **Pass:** Response is plain text containing `Event cancelled:` and the event ID.
+- If cancellation reports an uncertain outcome, inspect the organizer calendar and attendee cancellation messages; do not cancel again blindly.
 
 ### Step 25 -- Verify cancellation
 
@@ -545,11 +549,12 @@ To verify AC-5 manually:
 14. If a genuinely shared mounted calendar is available, call `calendar.list_events` and `calendar.search_events` with its alias. **Verify:** the calls succeed for validated personal or organizational accounts, return mounted-view references, and use the selected `/me/calendars/{mounted-id}` route. Unknown tenant context must fail locally.
 15. Use a mounted event reference with `calendar.get_event`. Then try references from an own event, owner-primary alias, and a different mounted alias. **Pass:** only the exact mounted target succeeds; every cross-view or cross-resource reference fails before Graph.
 16. If the configured mounted ID is no longer returned, call one mounted read. **Pass:** the response directs the operator to fresh discovery and `account.reselect_calendar_alias`, and no owner/default/matching-name fallback request occurs.
-17. For an organizational account with a genuinely editable mounted calendar, set its profile to `manage` and reconnect if required. Create a unique non-meeting event with `calendar.create_event` and `shared_resource`. **Verify:** the confirmation includes the event ID and a mounted `resource_ref`, and the event appears through a mounted read.
-18. Use the returned mounted reference with `update_event`, then use the renewed reference with `reschedule_event`. **Verify:** both confirmations renew provenance and every request remains on the selected `/me/calendars/{mounted-id}/events/{event-id}` route.
-19. Delete the mounted event with its latest reference. **Verify:** the confirmation identifies a mounted non-meeting deletion and the event is absent. Recreate a cleanup event if a later negative check needs one.
-20. Attempt mounted update or delete with a read-profile alias, personal or unknown tenant context, missing/tampered/cross-target reference, raw `event_id`, and read-only mode. **Pass:** each fails locally before mutation. If policy or alias removal can be introduced between preflight and mutation, verify the unstarted mutation is stopped with an actionable authority-change error.
-21. Attempt mounted `create_event` and `update_event` with `is_online_meeting=true`. If mounted events with attendees or existing online-meeting capability are available, attempt `update_event`, `reschedule_event`, and `delete_event` through the mounted alias. Also attempt `respond_event` and `cancel_meeting` with shared routing inputs. **Pass:** online enablement fails with zero Graph traffic; existing attendee-bearing, online-enabled, or unclassifiable events stop after preflight without mutation; meeting-specific verbs cannot acquire a shared route. If no suitable existing meeting is available, record that part as **SKIP** rather than changing a real meeting.
+17. After explicitly confirming `account.reselect_calendar_alias`, retry a signed event reference returned before reselection. **Pass:** the human alias, owner, kind, view, and profile are preserved, the resource ID changes, and the old reference is rejected locally before Graph traffic.
+18. For an organizational account with a genuinely editable mounted calendar, set its profile to `manage` and reconnect if required. Create a unique non-meeting event with `calendar.create_event` and `shared_resource`. **Verify:** the confirmation includes the event ID and a mounted `resource_ref`, and the event appears through a mounted read.
+19. Use the returned mounted reference with `update_event`, then use the renewed reference with `reschedule_event`. **Verify:** both confirmations renew provenance and every request remains on the selected `/me/calendars/{mounted-id}/events/{event-id}` route.
+20. Delete the mounted event with its latest reference. **Verify:** the confirmation identifies a mounted non-meeting deletion and the event is absent. Recreate a cleanup event if a later negative check needs one.
+21. Attempt mounted update or delete with a read-profile alias, personal or unknown tenant context, missing/tampered/cross-target reference, raw `event_id`, and read-only mode. **Pass:** each fails locally before mutation. If policy or alias removal can be introduced between preflight and mutation, verify the unstarted mutation is stopped with an actionable authority-change error.
+22. Attempt mounted `create_event` and `update_event` with `is_online_meeting=true`. If mounted events with attendees or existing online-meeting capability are available, attempt `update_event`, `reschedule_event`, and `delete_event` through the mounted alias. Also attempt `respond_event` and `cancel_meeting` with shared routing inputs. **Pass:** online enablement fails with zero Graph traffic; existing attendee-bearing, online-enabled, or unclassifiable events stop after preflight without mutation; meeting-specific verbs cannot acquire a shared route. If no suitable existing meeting is available, record that part as **SKIP** rather than changing a real meeting.
 
 ### Step 29e -- Shared-mail alias lifecycle and action policy
 
@@ -676,7 +681,7 @@ If no safe test file path under `OUTLOOK_MCP_ATTACHMENT_ROOTS` was supplied by t
 
 ### Step 36b -- Human-confirmed draft send
 
-Run only in interactive mode with a selected account whose `send` capability is true. Create a dedicated self-addressed draft, call `{tool: "mail", args: {operation: "send_draft", message_id: "<draft ID>"}}`, and verify MCP elicitation displays its subject, recipient, and attachment names before accepting. Verify the confirmation says Microsoft Graph accepted the send and that delivery remains subject to Exchange processing. In non-interactive mode or with `send` disabled, record SKIP; a boolean confirmation argument must never be supplied.
+Run only in interactive mode with a selected account whose `send` capability is true. Create a dedicated self-addressed draft, call `{tool: "mail", args: {operation: "send_draft", message_id: "<draft ID>"}}`, and verify MCP elicitation displays its subject, recipient, and attachment names before accepting. Verify the confirmation says Microsoft Graph accepted the send and that delivery remains subject to Exchange processing. In non-interactive mode or with `send` disabled, record SKIP; a boolean confirmation argument must never be supplied. A timeout, connection loss, 429, or 5xx after dispatch must be uncertain, attempted once, and reconciled by inspecting Drafts and Sent Items before a fresh review.
 
 For an organizational shared mailbox with tested Exchange Send As or Send on Behalf rights, create a dedicated shared draft and call `send_draft` with `shared_resource` plus its `draft_ref`. Verify the review shows masked delegate/owner, canonical From, separate To/Cc/Bcc, subject, the complete attachment set, body-review-in-Outlook warning, sender-right ambiguity, and owner Sent Items default. Accept only the unchanged disposable draft. **Verify:** authority and all evidence are refetched, exactly one owner-route send POST occurs, and the result says accepted for Exchange processing rather than delivered. Decline, remove an attachment, change a recipient, use a raw ID, disable send, and simulate incomplete pagination or unsupported elicitation; every case must dispatch no send. A timeout, connection loss, or 5xx after dispatch must be uncertain and never retried.
 

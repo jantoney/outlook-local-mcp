@@ -226,14 +226,7 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 		}
 
 		messages := make([]map[string]any, 0, maxResults)
-		pageIterator, pErr := msgraphcore.NewPageIterator[models.Messageable](
-			resp, client.GetAdapter(), models.CreateMessageCollectionResponseFromDiscriminatorValue,
-		)
-		if pErr != nil {
-			logger.Error("page iterator creation failed", "error", pErr.Error())
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create page iterator: %s", pErr.Error())), nil
-		}
-		iterErr := pageIterator.Iterate(ctx, func(msg models.Messageable) bool {
+		appendMessage := func(msg models.Messageable) bool {
 			var m map[string]any
 			if outputMode == "raw" {
 				m = graph.SerializeMessage(msg)
@@ -245,7 +238,20 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 			}
 			messages = append(messages, m)
 			return len(messages) < maxResults
-		})
+		}
+		var iterErr error
+		if target.isShared() {
+			iterErr = iteratePinnedSharedMessages(ctx, resp, client.GetAdapter(), target.target.Owner,
+				sharedMessageCollectionPath(target.target.Owner, ""), nil, appendMessage)
+		} else {
+			var pageIterator *msgraphcore.PageIterator[models.Messageable]
+			pageIterator, iterErr = msgraphcore.NewPageIterator[models.Messageable](
+				resp, client.GetAdapter(), models.CreateMessageCollectionResponseFromDiscriminatorValue,
+			)
+			if iterErr == nil {
+				iterErr = pageIterator.Iterate(ctx, appendMessage)
+			}
+		}
 		if iterErr != nil {
 			logger.Error("pagination failed", "error", iterErr.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to iterate messages: %s", iterErr.Error())), nil

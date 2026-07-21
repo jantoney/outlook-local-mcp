@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/resource"
@@ -83,7 +84,7 @@ func TestSharedSendUsesOneOwnerRoutePost(t *testing.T) {
 			return &mcp.ElicitationResult{ElicitationResponse: mcp.ElicitationResponse{Action: mcp.ElicitationResponseActionAccept, Content: map[string]any{"confirmed": true}}}, nil
 		},
 		send: func(ctx context.Context, target mailReadTarget, draftID string) error {
-			return target.root.Messages().ByMessageId(draftID).Send().Post(ctx, nil)
+			return sendSharedDraftOnce(ctx, target, draftID, time.Second)
 		},
 	}
 	request := mcp.CallToolRequest{}
@@ -105,6 +106,7 @@ func TestSharedAttachmentNextLinkCannotChangeOwnerRoute(t *testing.T) {
 		"https://graph.microsoft.com/v1.0/me/messages/draft+1/attachments?$skip=1",
 		"https://graph.microsoft.com/v1.0/users/other@example.com/messages/draft+1/attachments?$skip=1",
 		"http://graph.microsoft.com/v1.0/users/shared+ops@example.com/messages/draft+1/attachments?$skip=1",
+		"https://attacker.example/v1.0/users/shared+ops@example.com/messages/draft+1/attachments?$skip=1",
 	} {
 		if err := validateSharedAttachmentNextLink(invalid, "shared+ops@example.com", "draft+1"); err == nil {
 			t.Fatalf("accepted invalid next link %s", invalid)

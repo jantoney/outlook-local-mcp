@@ -42,6 +42,9 @@ func HandleListMailAliases(registry *auth.AccountRegistry) func(context.Context,
 // target and preserves immutable identity, owner, kind, view, and policy.
 func HandleRenameMailAlias(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		entry, alias, index, err := requireMailAlias(registry, request)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -77,6 +80,9 @@ func HandleRenameMailAlias(registry *auth.AccountRegistry, accountsPath string) 
 // recovered without Graph traffic.
 func HandleRemoveMailAlias(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		label, err := request.RequireString("label")
 		if err != nil {
 			return mcp.NewToolResultError("missing required parameter: label"), nil
@@ -109,6 +115,9 @@ func HandleRemoveMailAlias(registry *auth.AccountRegistry, accountsPath string) 
 // persistence or any later Graph routing.
 func HandleSetMailAliasPolicy(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		entry, alias, index, err := requireMailAlias(registry, request)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil

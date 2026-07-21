@@ -14,6 +14,9 @@ import (
 // is checked locally before persistence and no Graph request is made.
 func HandleAddMailAlias(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		label, err := request.RequireString("label")
 		if err != nil {
 			return mcp.NewToolResultError("missing required parameter: label"), nil

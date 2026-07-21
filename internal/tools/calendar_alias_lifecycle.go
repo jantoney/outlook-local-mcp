@@ -44,6 +44,9 @@ func HandleListCalendarAliases(registry *auth.AccountRegistry) func(context.Cont
 // alias selector while preserving immutable resource and routing identity.
 func HandleRenameCalendarAlias(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		entry, alias, index, err := requireCalendarAlias(registry, request)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -73,6 +76,9 @@ func HandleRenameCalendarAlias(registry *auth.AccountRegistry, accountsPath stri
 // removes one alias identity and thereby invalidates its future resolution.
 func HandleRemoveCalendarAlias(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		label, err := request.RequireString("label")
 		if err != nil {
 			return mcp.NewToolResultError("missing required parameter: label"), nil
@@ -103,6 +109,9 @@ func HandleRemoveCalendarAlias(registry *auth.AccountRegistry, accountsPath stri
 // target-local profile and enforces tenant compatibility before persistence.
 func HandleSetCalendarAliasProfile(registry *auth.AccountRegistry, accountsPath string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		entry, alias, index, err := requireCalendarAlias(registry, request)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -129,6 +138,9 @@ func HandleSetCalendarAliasProfile(registry *auth.AccountRegistry, accountsPath 
 // recipient-view calendar ID after fresh discovery and explicit confirmation.
 func HandleReselectCalendarAlias(registry *auth.AccountRegistry, accountsPath string, retryCfg graph.RetryConfig, timeout time.Duration) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		accountPolicyMutationMu.Lock()
+		defer accountPolicyMutationMu.Unlock()
+
 		entry, alias, index, err := requireCalendarAlias(registry, request)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -136,7 +148,11 @@ func HandleReselectCalendarAlias(registry *auth.AccountRegistry, accountsPath st
 		if alias.Kind != resource.CalendarKindMounted {
 			return mcp.NewToolResultError("only mounted calendar aliases can be reselected"), nil
 		}
-		updated, err := selectedMountedCalendar(ctx, request, entry, alias.ResourceID, alias.Alias, alias.Owner, alias.Profile, retryCfg, timeout)
+		selected, err := selectedMountedCalendar(ctx, request, entry, alias.ResourceID, alias.Alias, alias.Owner, alias.Profile, retryCfg, timeout)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		updated, err := alias.ReselectMounted(selected.MountedCalendarID)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

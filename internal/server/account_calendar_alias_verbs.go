@@ -134,7 +134,7 @@ func buildCalendarAliasVerbs(c accountVerbsConfig, wrap func(string, string, mcp
 		{
 			Name:        "reselect_calendar_alias",
 			Summary:     "reselect a missing mounted calendar without rebinding silently",
-			Description: "Performs fresh owner-filtered discovery and replaces only the mounted calendar ID after explicit human confirmation. Immutable resource identity, alias, owner, kind, view, and policy are preserved.",
+			Description: "Performs fresh owner-filtered discovery and replaces the mounted calendar ID after explicit human confirmation. A fresh immutable resource identity invalidates references from the prior selection; alias, owner, kind, view, and policy are preserved.",
 			SeeDocs:     []string{"concepts#shared-calendar-aliases"},
 			Handler: wrap("account.reselect_calendar_alias", "write", ReadOnlyGuard(
 				"account.reselect_calendar_alias", c.cfg.ReadOnly,
@@ -142,7 +142,7 @@ func buildCalendarAliasVerbs(c accountVerbsConfig, wrap func(string, string, mcp
 			Annotations: []mcp.ToolOption{
 				mcp.WithReadOnlyHintAnnotation(false),
 				mcp.WithDestructiveHintAnnotation(false),
-				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithIdempotentHintAnnotation(false),
 				mcp.WithOpenWorldHintAnnotation(true),
 			},
 			Schema: append(commonIdentity, mountedSelection...),

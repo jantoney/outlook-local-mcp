@@ -499,29 +499,34 @@ func executeSearchCalendarView(
 		"status", "ok")
 
 	events := make([]map[string]any, 0, maxResults)
-	pageIterator, err := msgraphcore.NewPageIterator[models.Eventable](
-		resp,
-		graphClient.GetAdapter(),
-		models.CreateEventCollectionResponseFromDiscriminatorValue,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create page iterator: %w", err)
-	}
-
-	if timezone != "" {
-		headers := abstractions.NewRequestHeaders()
-		headers.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
-		pageIterator.SetHeaders(headers)
-	}
-
-	err = pageIterator.Iterate(ctx, func(event models.Eventable) bool {
+	appendEvent := func(event models.Eventable) bool {
 		serialized := serialize(event)
 		if match != nil && !match(serialized) {
-			return true // skip non-matching, continue scanning
+			return true
 		}
 		events = append(events, serialized)
 		return len(events) < maxResults
-	})
+	}
+	var continuationHeaders *abstractions.RequestHeaders
+	if timezone != "" {
+		continuationHeaders = abstractions.NewRequestHeaders()
+		continuationHeaders.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
+	}
+	var err error
+	if target.isShared() {
+		err = iteratePinnedSharedEvents(ctx, resp, graphClient.GetAdapter(), sharedCalendarViewPath(target), continuationHeaders, appendEvent)
+	} else {
+		var pageIterator *msgraphcore.PageIterator[models.Eventable]
+		pageIterator, err = msgraphcore.NewPageIterator[models.Eventable](
+			resp, graphClient.GetAdapter(), models.CreateEventCollectionResponseFromDiscriminatorValue,
+		)
+		if err == nil {
+			if continuationHeaders != nil {
+				pageIterator.SetHeaders(continuationHeaders)
+			}
+			err = pageIterator.Iterate(ctx, appendEvent)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to iterate events: %w", err)
 	}

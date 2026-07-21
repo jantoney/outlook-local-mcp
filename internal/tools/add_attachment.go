@@ -90,7 +90,8 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 			}
 			var created models.Attachmentable
 			directCtx, directCancel := graph.WithTimeout(ctx, timeout)
-			created, postErr := target.root.Messages().ByMessageId(messageID).Attachments().Post(directCtx, attachment, nil)
+			config := &users.ItemMessagesItemAttachmentsRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+			created, postErr := target.root.Messages().ByMessageId(messageID).Attachments().Post(directCtx, attachment, config)
 			directCancel()
 			if postErr != nil {
 				return mcp.NewToolResultError(attachmentMutationError(target, postErr)), nil
@@ -113,15 +114,11 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 			item.SetSize(&size)
 			body := users.NewItemMessagesItemAttachmentsCreateUploadSessionPostRequestBody()
 			body.SetAttachmentItem(item)
-			var session models.UploadSessionable
 			sessionCtx, sessionCancel := graph.WithTimeout(ctx, timeout)
-			sessionErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
-				var callErr error
-				session, callErr = target.root.Messages().ByMessageId(messageID).Attachments().CreateUploadSession().Post(sessionCtx, body, nil)
-				return callErr
-			})
+			config := &users.ItemMessagesItemAttachmentsCreateUploadSessionRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+			session, sessionErr := target.root.Messages().ByMessageId(messageID).Attachments().CreateUploadSession().Post(sessionCtx, body, config)
 			sessionCancel()
-			if sessionErr != nil || session.GetUploadUrl() == nil {
+			if sessionErr != nil || session == nil || session.GetUploadUrl() == nil {
 				return mcp.NewToolResultError("failed to create attachment upload session"), nil
 			}
 			uploadCtx, uploadCancel := graph.WithTimeout(ctx, timeout)

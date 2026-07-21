@@ -2,11 +2,13 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
@@ -14,6 +16,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // draftSendSummary is the immutable human-review snapshot fetched immediately
@@ -34,6 +37,10 @@ type sendDraftState struct {
 	send   func(context.Context, *msgraphsdk.GraphServiceClient, string) error
 }
 
+// errOwnSendNotStarted identifies cancellation observed before the SDK send
+// call. It distinguishes a known no-attempt outcome from ambiguous dispatch.
+var errOwnSendNotStarted = errors.New("request timed out or was canceled before send dispatch; no message was sent")
+
 // NewHandleSendDraft creates a handler that sends an existing draft only after
 // an MCP client presents its metadata and a human explicitly accepts.
 func NewHandleSendDraft(retryCfg graph.RetryConfig, timeout time.Duration, codecs ...*resource.ReferenceCodec) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -43,11 +50,7 @@ func NewHandleSendDraft(retryCfg graph.RetryConfig, timeout time.Duration, codec
 		},
 		elicit: defaultSendDraftElicit,
 		send: func(ctx context.Context, client *msgraphsdk.GraphServiceClient, messageID string) error {
-			timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
-			defer cancel()
-			// Sending is irreversible and non-idempotent. Never blindly retry an
-			// ambiguous failure because Graph may already have accepted the send.
-			return client.Me().Messages().ByMessageId(messageID).Send().Post(timeoutCtx, nil)
+			return sendOwnDraftOnce(ctx, client, messageID, timeout)
 		},
 	}
 	own := handleSendDraft(state)
@@ -58,6 +61,19 @@ func NewHandleSendDraft(retryCfg graph.RetryConfig, timeout time.Duration, codec
 		}
 		return own(ctx, request)
 	}
+}
+
+// sendOwnDraftOnce sends messageID through the signed-in user's route within
+// timeout. It returns errOwnSendNotStarted when cancellation is already known,
+// otherwise it performs exactly one SDK POST with transparent retries disabled.
+func sendOwnDraftOnce(ctx context.Context, client *msgraphsdk.GraphServiceClient, messageID string, timeout time.Duration) error {
+	timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := timeoutCtx.Err(); err != nil {
+		return fmt.Errorf("%w: %v", errOwnSendNotStarted, err)
+	}
+	config := &users.ItemMessagesItemSendRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+	return client.Me().Messages().ByMessageId(messageID).Send().Post(timeoutCtx, config)
 }
 
 // handleSendDraft implements validation and the mandatory accept-only gate.
@@ -95,15 +111,37 @@ func handleSendDraft(state *sendDraftState) func(context.Context, mcp.CallToolRe
 		if !sameDraftVersion(summary, current) {
 			return mcp.NewToolResultError("draft changed after confirmation; review and confirm it again"), nil
 		}
+		if ctx.Err() != nil {
+			auth.RecordAuditOutcome(ctx, "canceled")
+			return mcp.NewToolResultError(errOwnSendNotStarted.Error()), nil
+		}
 		if err := state.send(ctx, client, messageID); err != nil {
+			if errors.Is(err, errOwnSendNotStarted) {
+				auth.RecordAuditOutcome(ctx, "canceled")
+				return mcp.NewToolResultError(errOwnSendNotStarted.Error()), nil
+			}
+			if ownSendOutcomeUncertain(err) {
+				auth.RecordAuditOutcome(ctx, "uncertain")
+				return mcp.NewToolResultError("draft send outcome is uncertain; do not retry. Inspect Drafts and Sent Items before a new human-reviewed attempt. Detail: " + graph.RedactGraphError(err)), nil
+			}
+			auth.RecordAuditOutcome(ctx, "denied")
 			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
 		}
+		auth.RecordAuditOutcome(ctx, "accepted")
 		response := fmt.Sprintf("Draft send accepted by Microsoft Graph: %s\nFinal delivery remains subject to Exchange processing.", messageID)
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line
 		}
 		return mcp.NewToolResultText(response), nil
 	}
+}
+
+// ownSendOutcomeUncertain reports whether an attempted send may have reached
+// Graph despite its error. Transport/status-zero, timeout, 429, and server
+// failures require mailbox reconciliation; definite client errors do not.
+func ownSendOutcomeUncertain(err error) bool {
+	status := graph.ExtractHTTPStatus(err)
+	return err != nil && (graph.IsTimeoutError(err) || status == 0 || status == 429 || status >= 500)
 }
 
 // defaultSendDraftElicit requests form elicitation from the current MCP server.

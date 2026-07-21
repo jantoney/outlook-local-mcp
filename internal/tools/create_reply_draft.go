@@ -121,14 +121,16 @@ func NewHandleCreateReplyDraft(retryCfg graph.RetryConfig, timeout time.Duration
 				c := comment
 				body.SetComment(&c)
 			}
-			created, err = target.root.Messages().ByMessageId(messageID).CreateReplyAll().Post(timeoutCtx, body, nil)
+			config := &users.ItemMessagesItemCreateReplyAllRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+			created, err = target.root.Messages().ByMessageId(messageID).CreateReplyAll().Post(timeoutCtx, body, config)
 		} else {
 			body := users.NewItemMessagesItemCreateReplyPostRequestBody()
 			if comment != "" {
 				c := comment
 				body.SetComment(&c)
 			}
-			created, err = target.root.Messages().ByMessageId(messageID).CreateReply().Post(timeoutCtx, body, nil)
+			config := &users.ItemMessagesItemCreateReplyRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+			created, err = target.root.Messages().ByMessageId(messageID).CreateReply().Post(timeoutCtx, body, config)
 		}
 		if err != nil {
 			logger.ErrorContext(ctx, "create reply draft failed", "error", graph.FormatGraphError(err))

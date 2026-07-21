@@ -47,6 +47,7 @@ func TestSharedMailReadGuardFailsBeforeHandlerAndTransport(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			registry, entry, codec := sharedMailGuardFixture(t, client, test.tenant)
 			test.setup(entry)
+			publishSharedMailGuardEntry(t, registry, entry)
 			request := requestWithArguments(map[string]any{"shared_resource": "finance-mail"})
 			result, err := ResolvedTargetGuard(registry, mailSharedReadGuard(), &codec, inner)(ownerGuardAccountContext(entry), request)
 			if err != nil || !result.IsError {
@@ -64,6 +65,7 @@ func TestSharedMailReadGuardFailsBeforeHandlerAndTransport(t *testing.T) {
 		}
 		other.Policy.Read = true
 		entry.MailAliases = append(entry.MailAliases, other)
+		publishSharedMailGuardEntry(t, registry, entry)
 		otherTarget, err := resource.TargetFromMailAlias(entry.AccountID, other)
 		if err != nil {
 			t.Fatalf("TargetFromMailAlias() error = %v", err)
@@ -94,6 +96,7 @@ func TestSharedMailReadGuardRecordsOwnerAuditTarget(t *testing.T) {
 	defer server.Close()
 	registry, entry, codec := sharedMailGuardFixture(t, client, auth.TokenTenantOrganizational)
 	enableSharedMailRead(entry)
+	publishSharedMailGuardEntry(t, registry, entry)
 	inner := mcpserver.ToolHandlerFunc(func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		target, ok := auth.AuditTargetFromContext(ctx)
 		if !ok || target.Alias != "finance-mail" || target.ResourceKind != resource.ResourceKindMailbox ||
@@ -147,6 +150,7 @@ func TestSharedDraftGuardsFailBeforeHandler(t *testing.T) {
 	}
 	other.Policy.Draft = true
 	entry.MailAliases = append(entry.MailAliases, other)
+	publishSharedMailGuardEntry(t, registry, entry)
 	otherTarget, err := resource.TargetFromMailAlias(entry.AccountID, other)
 	if err != nil {
 		t.Fatalf("TargetFromMailAlias() error = %v", err)
@@ -200,6 +204,7 @@ func TestMoveMessageGuardRequiresEnabledTargetBoundSource(t *testing.T) {
 	}
 	other.Policy.Move = true
 	entry.MailAliases = append(entry.MailAliases, other)
+	publishSharedMailGuardEntry(t, registry, entry)
 	otherTarget, err := resource.TargetFromMailAlias(entry.AccountID, other)
 	if err != nil {
 		t.Fatal(err)
@@ -235,6 +240,7 @@ func TestSharedSendGuardRequiresSendAndDraftReference(t *testing.T) {
 	})
 	registry, entry, codec := sharedMailGuardFixture(t, client, auth.TokenTenantOrganizational)
 	entry.MailAliases[0].Policy.Draft = true
+	publishSharedMailGuardEntry(t, registry, entry)
 	result, err := ResolvedTargetGuard(registry, mailSendDraftGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(map[string]any{
 		"shared_resource": "finance-mail", "message_id": "draft-1",
 	}))
@@ -242,6 +248,7 @@ func TestSharedSendGuardRequiresSendAndDraftReference(t *testing.T) {
 		t.Fatalf("draft-only/raw result = %+v, calls = %d, error = %v", result, handlerCalls.Load(), err)
 	}
 	entry.MailAliases[0].Policy.Send = true
+	publishSharedMailGuardEntry(t, registry, entry)
 	target, err := resource.TargetFromMailAlias(entry.AccountID, entry.MailAliases[0])
 	if err != nil {
 		t.Fatal(err)
@@ -286,3 +293,16 @@ func sharedMailGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient,
 
 // enableSharedMailRead enables only the alias-local read action.
 func enableSharedMailRead(entry *auth.AccountEntry) { entry.MailAliases[0].Policy.Read = true }
+
+// publishSharedMailGuardEntry applies fixture policy changes through the same
+// locked registry mutation boundary used by production policy updates.
+func publishSharedMailGuardEntry(t *testing.T, registry *auth.AccountRegistry, entry *auth.AccountEntry) {
+	t.Helper()
+	if err := registry.Update(entry.Label, func(current *auth.AccountEntry) {
+		current.TokenTenantContext = entry.TokenTenantContext
+		current.CalendarAliases = append([]resource.CalendarAlias(nil), entry.CalendarAliases...)
+		current.MailAliases = append([]resource.MailAlias(nil), entry.MailAliases...)
+	}); err != nil {
+		t.Fatalf("registry.Update() error = %v", err)
+	}
+}

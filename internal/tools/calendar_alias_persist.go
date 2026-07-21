@@ -11,17 +11,18 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/resource"
 )
 
-// accountPolicyMutationMu serializes own-mail, calendar-alias, and mail-alias
-// persistence with runtime scope-state publication in this process.
+// accountPolicyMutationMu serializes account lifecycle, own-mail policy,
+// calendar-alias, and mail-alias read-modify-persist-publish transactions in
+// this process. Sharing the lock with account add/remove prevents a stale
+// transaction from publishing into a recreated account that reused a label.
 var accountPolicyMutationMu sync.Mutex
 
 // replaceCalendarAliases persists and publishes one account's calendar alias
 // family as one serialized mutation. It disconnects and clears local auth only
-// when the account-wide OAuth scope union changes.
+// when the account-wide OAuth scope union changes. The caller must hold
+// accountPolicyMutationMu from before it reads entry until this function
+// returns.
 func replaceCalendarAliases(registry *auth.AccountRegistry, accountsPath string, entry *auth.AccountEntry, aliases []resource.CalendarAlias) (bool, error) {
-	accountPolicyMutationMu.Lock()
-	defer accountPolicyMutationMu.Unlock()
-
 	oldScopes := auth.ScopesForAccountEntry(entry)
 	newScopes := auth.OAuthScopeUnion(
 		auth.ScopesForMailPolicy(entry.MailPolicy),

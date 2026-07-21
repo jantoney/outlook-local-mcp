@@ -25,12 +25,14 @@ type AuditTarget struct {
 	Compatibility string
 }
 
+// auditTargetRecorder synchronizes the immutable target snapshot for one request.
 type auditTargetRecorder struct {
 	mu     sync.Mutex
 	target AuditTarget
 	set    bool
 }
 
+// auditTargetKeyType prevents collisions with caller-owned context keys.
 type auditTargetKeyType struct{}
 
 var auditTargetKey auditTargetKeyType

@@ -74,6 +74,9 @@ func HandleListAccounts(registry *auth.AccountRegistry) func(ctx context.Context
 			// Lazily fetch email for authenticated accounts.
 			if entry.Client != nil {
 				auth.EnsureEmail(ctx, entry)
+				if entry.Email != "" {
+					_ = registry.PublishEmail(entry.Label, entry.AccountID, entry.Email)
+				}
 			}
 			calendarAliases := append([]resource.CalendarAlias{}, entry.CalendarAliases...)
 			mailAliases := append([]resource.MailAlias{}, entry.MailAliases...)

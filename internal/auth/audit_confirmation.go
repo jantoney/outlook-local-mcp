@@ -12,6 +12,8 @@ type auditConfirmationRecorder struct {
 	state string
 }
 
+// auditConfirmationKeyType prevents collisions with context keys owned by
+// callers or other packages.
 type auditConfirmationKeyType struct{}
 
 var auditConfirmationKey auditConfirmationKeyType

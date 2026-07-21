@@ -2,8 +2,8 @@ package resource
 
 import "testing"
 
-// TestCalendarAliasIdentityLifecycle verifies rename and reselection preserve
-// identity while fresh creation produces an unrelated revocation boundary.
+// TestCalendarAliasIdentityLifecycle verifies rename preserves identity while
+// reselection creates a new revocation boundary for the mounted calendar.
 func TestCalendarAliasIdentityLifecycle(t *testing.T) {
 	t.Parallel()
 
@@ -23,8 +23,11 @@ func TestCalendarAliasIdentityLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReselectMounted() error = %v", err)
 	}
-	if renamed.ResourceID != original.ResourceID || reselected.ResourceID != original.ResourceID {
-		t.Fatal("rename or reselection changed immutable resource identity")
+	if renamed.ResourceID != original.ResourceID {
+		t.Fatal("rename changed immutable resource identity")
+	}
+	if reselected.ResourceID == original.ResourceID {
+		t.Fatal("reselection preserved the prior resource identity")
 	}
 	if reselected.MountedCalendarID != "mounted-2" {
 		t.Fatalf("mounted ID = %q, want mounted-2", reselected.MountedCalendarID)

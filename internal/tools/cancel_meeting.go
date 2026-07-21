@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/desek/outlook-local-mcp/internal/validate"
@@ -68,7 +69,8 @@ func NewCancelMeetingTool() mcp.Tool {
 // request context at invocation time.
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retained for handler compatibility; cancellation notices are
+//     irreversible and the POST is never retried automatically.
 //   - timeout: the maximum duration for the Graph API call.
 //
 // Returns a closure matching the MCP tool handler function signature. The
@@ -78,7 +80,7 @@ func NewCancelMeetingTool() mcp.Tool {
 //
 // Side effects: calls POST /me/events/{id}/cancel on the Microsoft Graph API.
 // Logs at debug level on entry, error level on failure, and info level on success.
-func HandleCancelEvent(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func HandleCancelEvent(_ graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		if err := rejectSharedMeetingRoute(request); err != nil {
@@ -122,19 +124,18 @@ func HandleCancelEvent(retryCfg graph.RetryConfig, timeout time.Duration) func(c
 			return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 		}
 
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			return client.Me().Events().ByEventId(eventID).Cancel().Post(timeoutCtx, cancelBody, nil)
-		})
+		config := &graphusers.ItemEventsItemCancelRequestBuilderPostRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		err = client.Me().Events().ByEventId(eventID).Cancel().Post(timeoutCtx, cancelBody, config)
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
+			if calendarMutationOutcomeUncertain(err) {
+				auth.RecordAuditOutcome(ctx, "uncertain")
+				return mcp.NewToolResultError(ambiguousCalendarMutationError("Meeting cancellation", "Inspect the organizer calendar and attendee cancellation messages before cancelling again.", err)), nil
 			}
+			auth.RecordAuditOutcome(ctx, "denied")
 			logger.ErrorContext(ctx, "cancel event failed", "event_id", eventID, "error", graph.FormatGraphError(err))
 			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
 		}
+		auth.RecordAuditOutcome(ctx, "accepted")
 
 		logger.InfoContext(ctx, "event cancelled", "event_id", eventID)
 

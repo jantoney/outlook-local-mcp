@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/desek/outlook-local-mcp/internal/resource"
@@ -118,7 +119,8 @@ func NewCreateEventTool() mcp.Tool {
 // MCP-created. When empty, provenance tagging is skipped entirely.
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retained for handler compatibility; event creation is
+//     non-idempotent and never retried automatically.
 //   - timeout: the maximum duration for the Graph API call.
 //   - defaultTimezone: the IANA timezone from server config, used as the default
 //     when start_timezone or end_timezone is omitted by the caller.
@@ -131,7 +133,7 @@ func NewCreateEventTool() mcp.Tool {
 // Side effects: calls POST on the exact own or authorized mounted event
 // collection. Mounted requests cannot enable online meetings. Logs at debug
 // level on entry, error level on failure, and info level on success.
-func HandleCreateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func HandleCreateEvent(_ graph.RetryConfig, timeout time.Duration, defaultTimezone string, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		args := request.GetArguments()
@@ -352,21 +354,20 @@ func HandleCreateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		} else {
 			logger.DebugContext(ctx, "creating event in default calendar")
 		}
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			var graphErr error
-			createdEvent, graphErr = createCalendarEvent(timeoutCtx, target, calID, event)
-			return graphErr
-		})
+		if timeoutCtx.Err() != nil {
+			return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
+		}
+		createdEvent, err = createCalendarEvent(timeoutCtx, target, calID, event)
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
+			if calendarMutationOutcomeUncertain(err) {
+				auth.RecordAuditOutcome(ctx, "uncertain")
+				return mcp.NewToolResultError(ambiguousCalendarMutationError("Event creation", "Inspect the target calendar around the requested time and subject before making another attempt.", err)), nil
 			}
+			auth.RecordAuditOutcome(ctx, "denied")
 			logger.ErrorContext(ctx, "create event failed", "error", graph.FormatGraphError(err))
 			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
 		}
+		auth.RecordAuditOutcome(ctx, "accepted")
 
 		eventID := graph.SafeStr(createdEvent.GetId())
 		logger.InfoContext(ctx, "event created", "event_id", eventID)

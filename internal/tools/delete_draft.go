@@ -16,6 +16,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // NewDeleteDraftTool creates the MCP tool definition for mail_delete_draft.
@@ -82,9 +83,8 @@ func NewHandleDeleteDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
 
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			return target.root.Messages().ByMessageId(messageID).Delete(timeoutCtx, nil)
-		})
+		config := &users.ItemMessagesMessageItemRequestBuilderDeleteRequestConfiguration{Options: graph.NoRetryRequestOptions()}
+		err = target.root.Messages().ByMessageId(messageID).Delete(timeoutCtx, config)
 		if err != nil {
 			if graph.IsTimeoutError(err) {
 				logger.ErrorContext(ctx, "request timed out",

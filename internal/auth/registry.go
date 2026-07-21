@@ -149,7 +149,8 @@ func NewAccountRegistry() *AccountRegistry {
 //
 // Returns an error if the label is invalid or already registered.
 //
-// Side effects: stores the entry in the registry under its Label.
+// Side effects: stores a detached snapshot under the entry's Label; later
+// caller mutations do not change registry state.
 func (r *AccountRegistry) Add(entry *AccountEntry) error {
 	if entry == nil {
 		return fmt.Errorf("account entry must not be nil")
@@ -157,7 +158,8 @@ func (r *AccountRegistry) Add(entry *AccountEntry) error {
 	if !labelPattern.MatchString(entry.Label) {
 		return fmt.Errorf("invalid account label %q: must match %s", entry.Label, labelPattern.String())
 	}
-	entry.TokenTenantContext = NormalizeTokenTenantContext(entry.TokenTenantContext)
+	stored := snapshotAccountEntry(entry)
+	stored.TokenTenantContext = NormalizeTokenTenantContext(stored.TokenTenantContext)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -166,7 +168,7 @@ func (r *AccountRegistry) Add(entry *AccountEntry) error {
 		return fmt.Errorf("account %q already registered", entry.Label)
 	}
 
-	r.accounts[entry.Label] = entry
+	r.accounts[entry.Label] = stored
 	return nil
 }
 
@@ -198,13 +200,13 @@ func (r *AccountRegistry) Remove(label string) error {
 // Parameters:
 //   - label: the label of the account to retrieve.
 //
-// Returns the entry and true if found, or nil and false if not.
+// Returns a detached deep snapshot and true if found, or nil and false if not.
 func (r *AccountRegistry) Get(label string) (*AccountEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	entry, exists := r.accounts[label]
-	return entry, exists
+	return snapshotAccountEntry(entry), exists
 }
 
 // GetByUPN retrieves an account entry by its User Principal Name (UPN),
@@ -215,8 +217,8 @@ func (r *AccountRegistry) Get(label string) (*AccountEntry, bool) {
 // Parameters:
 //   - upn: the user principal name to look up (e.g., "alice@contoso.com").
 //
-// Returns the matching entry and true on success, or nil and false when no
-// entry has a matching Email. An empty upn argument never matches.
+// Returns a detached deep snapshot and true on success, or nil and false when
+// no entry has a matching Email. An empty upn argument never matches.
 func (r *AccountRegistry) GetByUPN(upn string) (*AccountEntry, bool) {
 	if upn == "" {
 		return nil, false
@@ -227,7 +229,7 @@ func (r *AccountRegistry) GetByUPN(upn string) (*AccountEntry, bool) {
 
 	for _, entry := range r.accounts {
 		if strings.EqualFold(entry.Email, upn) {
-			return entry, true
+			return snapshotAccountEntry(entry), true
 		}
 	}
 	return nil, false
@@ -241,7 +243,8 @@ func (r *AccountRegistry) GetByUPN(upn string) (*AccountEntry, bool) {
 //
 // Parameters:
 //   - label: label of the entry to modify.
-//   - fn: callback invoked with the live entry pointer; must not be nil.
+//   - fn: callback invoked with the live entry pointer; must not be nil or
+//     retain the pointer after returning.
 //
 // Returns an error if the label is not found or fn is nil.
 //
@@ -266,15 +269,15 @@ func (r *AccountRegistry) Update(label string, fn func(*AccountEntry)) error {
 
 // List returns all registered account entries sorted alphabetically by label.
 //
-// Returns a slice of account entries. The returned slice is a copy; modifying
-// it does not affect the registry.
+// Returns detached deep snapshots sorted by label. Modifying the returned
+// entries or their slices does not affect the registry.
 func (r *AccountRegistry) List() []*AccountEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	entries := make([]*AccountEntry, 0, len(r.accounts))
 	for _, entry := range r.accounts {
-		entries = append(entries, entry)
+		entries = append(entries, snapshotAccountEntry(entry))
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -295,8 +298,8 @@ func (r *AccountRegistry) Count() int {
 // ListAuthenticated returns all registered account entries that have
 // Authenticated == true, sorted alphabetically by label.
 //
-// Returns a slice of authenticated account entries. The returned slice is a
-// copy; modifying it does not affect the registry.
+// Returns detached deep snapshots of authenticated entries. Modifying the
+// returned entries or their slices does not affect the registry.
 func (r *AccountRegistry) ListAuthenticated() []*AccountEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -304,7 +307,7 @@ func (r *AccountRegistry) ListAuthenticated() []*AccountEntry {
 	entries := make([]*AccountEntry, 0, len(r.accounts))
 	for _, entry := range r.accounts {
 		if entry.Authenticated {
-			entries = append(entries, entry)
+			entries = append(entries, snapshotAccountEntry(entry))
 		}
 	}
 

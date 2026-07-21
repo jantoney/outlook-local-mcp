@@ -26,12 +26,14 @@ type AuditSendEvidence struct {
 	SendAttempt bool
 }
 
+// auditSendEvidenceRecorder synchronizes sanitized evidence for one request.
 type auditSendEvidenceRecorder struct {
 	mu       sync.Mutex
 	evidence AuditSendEvidence
 	set      bool
 }
 
+// auditSendEvidenceKeyType prevents collisions with caller-owned context keys.
 type auditSendEvidenceKeyType struct{}
 
 var auditSendEvidenceKey auditSendEvidenceKeyType
