@@ -16,6 +16,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/config"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/observability"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/tools"
 	"github.com/desek/outlook-local-mcp/internal/tools/help"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -26,6 +27,12 @@ import (
 // mailVerbsConfig holds the dependencies required to build the mail domain verb
 // slice. All fields are captured at server start.
 type mailVerbsConfig struct {
+	// registry supplies the selected account's current target allowlist.
+	registry *auth.AccountRegistry
+
+	// referenceCodec signs and verifies restart-stable mail provenance.
+	referenceCodec *resource.ReferenceCodec
+
 	// retryCfg is the Graph API retry configuration applied to all mail handlers.
 	retryCfg graph.RetryConfig
 
@@ -96,14 +103,20 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		h = auth.RequireMailCapability(requiredMailCapability(name), h)
 		return tools.Handler(c.accountResolverMW(c.authMW(observability.WithObservability(name, c.m, c.tracer, ReadOnlyGuard(name, c.readOnly, audit.AuditWrap(name, auditOp, h))))))
 	}
+	wrapTarget := func(guard TargetGuardConfig) func(string, string, mcpserver.ToolHandlerFunc) tools.Handler {
+		return func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
+			h = ResolvedTargetGuard(c.registry, guard, c.referenceCodec, h)
+			return tools.Handler(c.accountResolverMW(c.authMW(observability.WithObservability(name, c.m, c.tracer, audit.AuditWrap(name, auditOp, h)))))
+		}
+	}
 
 	rc := c.retryCfg
 
 	verbs := []tools.Verb{
 		help.NewHelpVerb(registryPtr),
-		buildListFoldersVerb(c, rc, wrap),
-		buildListMessagesVerb(c, rc, wrap),
-		buildGetMessageVerb(c, rc, wrap),
+		buildListFoldersVerb(c, rc, wrapTarget(mailSharedReadGuard())),
+		buildListMessagesVerb(c, rc, wrapTarget(mailSharedFolderReadGuard())),
+		buildGetMessageVerb(c, rc, wrapTarget(mailSharedMessageReadGuard())),
 		buildSearchMessagesVerb(c, rc, wrap),
 		buildGetConversationVerb(c, rc, wrap),
 		buildListAttachmentsVerb(c, rc, wrap),
@@ -188,9 +201,9 @@ func buildListFoldersVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(str
 	return tools.Verb{
 		Name:        "list_folders",
 		Summary:     "list mail folders (Inbox, Sent, Drafts, etc.) with unread and total counts",
-		Description: "Returns all mail folders with their display name, unread message count, and total message count. Use the returned folder IDs with list_messages to scope queries to a specific folder. Requires the exact read capability.",
-		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrap("mail.list_folders", "read", tools.NewHandleListMailFolders(rc, c.timeout)),
+		Description: "Returns mail folders with display name, unread count, total count, and target-bound folder references for organizational shared mailboxes. shared_resource selects only the configured owner view; use folder_ref with shared list_messages. Requires the exact target-local read capability.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#shared-mail-aliases"},
+		Handler:     wrap("mail.list_folders", "read", tools.NewHandleListMailFolders(rc, c.timeout, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -198,6 +211,7 @@ func buildListFoldersVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(str
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability.")),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),
@@ -218,13 +232,13 @@ func buildListMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(st
 	return tools.Verb{
 		Name:        "list_messages",
 		Summary:     "list messages in a folder or across all folders; filter by date, sender, thread",
-		Description: "Lists messages in a mail folder or across all folders, with optional filters for date range, sender, conversation thread, read state, draft state, attachment presence, importance, and flag status. Results include a bodyPreview; use get_message with output=raw for the full HTML body. For full-text search, use search_messages instead.",
+		Description: "Lists messages in an own or organizational shared mailbox, optionally within a folder. shared_resource selects only the configured owner view; shared folder selection requires folder_ref from list_folders and rejects raw folder_id. Shared text and summary results include target-bound message references; raw preserves Graph-derived data beside provenance. Results include bodyPreview; use get_message with output=raw for full HTML.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"folder_id": "Inbox", "is_read": false}, Comment: "list unread messages in inbox"},
 			{Args: map[string]any{"from": "alice@contoso.com", "max_results": 10}, Comment: "list recent messages from a sender"},
 		},
-		SeeDocs: []string{"concepts#output-tiers", "concepts#independent-mail-action-policies"},
-		Handler: wrap("mail.list_messages", "read", tools.NewHandleListMessages(rc, c.timeout, c.provenancePropertyID)),
+		SeeDocs: []string{"concepts#output-tiers", "concepts#independent-mail-action-policies", "concepts#shared-mail-aliases"},
+		Handler: wrap("mail.list_messages", "read", tools.NewHandleListMessages(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -232,9 +246,11 @@ func buildListMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(st
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability.")),
 			mcp.WithString("folder_id",
-				mcp.Description("Mail folder ID to list messages from. Omit to list from all folders."),
+				mcp.Description("Own-mail folder ID. Rejected with shared_resource; use folder_ref."),
 			),
+			mcp.WithString("folder_ref", mcp.Description("Optional signed folder reference from shared list_folders.")),
 			mcp.WithString("start_datetime",
 				mcp.Description("Start of date range (ISO 8601, e.g. 2026-03-12T00:00:00Z). Filters by receivedDateTime >=."),
 			),
@@ -291,9 +307,9 @@ func buildGetMessageVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(stri
 	return tools.Verb{
 		Name:        "get_message",
 		Summary:     "get full message details by ID; bodyPreview by default, full body via output=raw",
-		Description: "Fetches full metadata for a single mail message by its ID. Text and summary output include a bodyPreview (first 255 characters). To read the complete HTML body and all headers, use output=raw. Use list_messages or search_messages to obtain a message ID.",
-		SeeDocs:     []string{"concepts#output-tiers"},
-		Handler:     wrap("mail.get_message", "read", tools.NewHandleGetMessage(rc, c.timeout, c.provenancePropertyID)),
+		Description: "Fetches one own or organizational shared-mail message. Shared calls select shared_resource and require the target-bound resource_ref returned by list_messages; alias-plus-message_id is rejected. Text and summary include renewed provenance. Raw preserves Graph-derived message data beside provenance and includes the full HTML body and headers.",
+		SeeDocs:     []string{"concepts#output-tiers", "concepts#shared-mail-aliases", "troubleshooting#shared-mail-reference-rejected"},
+		Handler:     wrap("mail.get_message", "read", tools.NewHandleGetMessage(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -301,10 +317,11 @@ func buildGetMessageVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(stri
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability. Requires resource_ref.")),
 			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the message to retrieve."),
+				mcp.Description("Own-mail message ID. Required without shared_resource and rejected for shared reads."),
 			),
+			mcp.WithString("resource_ref", mcp.Description("Signed target-bound message reference required with shared_resource.")),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),

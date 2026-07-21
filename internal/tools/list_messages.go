@@ -18,6 +18,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	abstractions "github.com/microsoft/kiota-abstractions-go"
@@ -126,9 +127,8 @@ func NewListMessagesTool() mcp.Tool {
 	)
 }
 
-// NewHandleListMessages creates a tool handler that lists email messages by
-// calling the Graph API's messages endpoint with OData $filter support. The
-// Graph client is retrieved from the request context at invocation time.
+// NewHandleListMessages creates a handler that lists messages from the exact
+// own or authorized shared owner root with OData filter and pagination support.
 //
 // Parameters:
 //   - retryCfg: retry configuration for transient Graph API errors.
@@ -137,12 +137,12 @@ func NewListMessagesTool() mcp.Tool {
 // Returns a tool handler function compatible with the MCP server's AddTool method.
 //
 // The handler:
-//   - Retrieves the Graph client from context via GraphClient.
+//   - Retrieves the guarded typed mail root and Graph adapter from context.
 //   - Validates optional parameters (folder_id, start_datetime, end_datetime,
 //     from, conversation_id, timezone).
 //   - Builds an OData $filter string from provided filter parameters, ANDing
 //     multiple conditions together.
-//   - Routes to /me/messages or /me/mailFolders/{id}/messages based on folder_id.
+//   - Routes beneath the selected user root, using verified shared folder refs.
 //   - Orders results by receivedDateTime desc.
 //   - Uses PageIterator for pagination with a max_results cap.
 //   - Serializes messages using SerializeSummaryMessage or SerializeMessage from
@@ -150,11 +150,15 @@ func NewListMessagesTool() mcp.Tool {
 //   - Returns Graph API errors via mcp.NewToolResultError with RedactGraphError.
 //   - Returns timeout errors via mcp.NewToolResultError with TimeoutErrorMessage.
 //   - Logs entry at debug level, completion at info level, errors at error level.
-func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
+		target, err := mailTargetFromContext(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("no account selected"), nil
+		}
 		client, err := GraphClient(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
@@ -167,7 +171,10 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 		}
 
 		// Extract and validate optional parameters.
-		folderID := request.GetString("folder_id", "")
+		folderID, err := target.folderID(request.GetString("folder_id", ""))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		if folderID != "" {
 			if err := validate.ValidateResourceID(folderID, "folder_id"); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -319,7 +326,7 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = client.Me().MailFolders().ByMailFolderId(folderID).Messages().Get(timeoutCtx, cfg)
+				resp, err = target.root.MailFolders().ByMailFolderId(folderID).Messages().Get(timeoutCtx, cfg)
 				return err
 			})
 		} else {
@@ -346,7 +353,7 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = client.Me().Messages().Get(timeoutCtx, cfg)
+				resp, err = target.root.Messages().Get(timeoutCtx, cfg)
 				return err
 			})
 		}
@@ -361,7 +368,7 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 			logger.Error("graph API call failed",
 				"error", graph.FormatGraphError(graphErr),
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(graphErr)), nil
+			return mcp.NewToolResultError(target.graphError(graphErr)), nil
 		}
 
 		logger.Debug("graph API response",
@@ -381,7 +388,6 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 				"duration", time.Since(start))
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create page iterator: %s", err.Error())), nil
 		}
-
 		if timezone != "" {
 			headers := abstractions.NewRequestHeaders()
 			headers.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
@@ -402,6 +408,10 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 				"duration", time.Since(start))
 			return mcp.NewToolResultError(fmt.Sprintf("failed to iterate messages: %s", err.Error())), nil
 		}
+		wrapped, err := addSharedMailReferences(messages, target, referenceCodec(codecs), resource.ItemKindMessage, outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Return text output when requested.
 		if outputMode == "text" {
@@ -411,7 +421,7 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 			return mcp.NewToolResultText(FormatMessagesText(messages)), nil
 		}
 
-		jsonBytes, err := json.Marshal(messages)
+		jsonBytes, err := json.Marshal(wrapped)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),

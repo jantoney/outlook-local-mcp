@@ -163,6 +163,8 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 	// updated with the populated map so that the help verb can introspect all
 	// registered verbs at call time (not at construction time).
 	mailVerbs, mailRegistry := buildMailVerbs(mailVerbsConfig{
+		registry:             registry,
+		referenceCodec:       referenceCodec,
 		retryCfg:             retryCfg,
 		timeout:              timeout,
 		cfg:                  cfg,

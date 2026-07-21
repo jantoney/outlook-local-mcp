@@ -560,6 +560,9 @@ To verify AC-5 manually:
 5. Rename the alias and verify its resource ID, owner, kind, view, and policy are unchanged.
 6. Remove the alias twice, recreate the same selector, and verify the recreated `resource_id` differs. Remove it as cleanup.
 7. **Fail:** if a personal or unknown context accepts shared-mail configuration, a retained OAuth scope authorizes a disabled action, own-mail policy constrains the alias policy, or read-only mode allows a mutation before persistence.
+8. With a genuinely delegated organizational shared mailbox, enable only `read`, reconnect if the scope union changed, and call `mail.list_folders` in text, summary, and raw modes with `shared_resource`. **Verify:** the route remains `/users/{owner}/mailFolders`; text and summary expose signed folder references; raw keeps Graph-derived data under `data` and references under `provenance`.
+9. Use one folder reference with shared `mail.list_messages`, then use one returned message reference with shared `mail.get_message`. Exercise text, summary, and raw tiers. **Verify:** every request stays in the configured owner view, message references are target-bound, bodyPreview remains the default, and raw full-message data is not injected with local fields.
+10. Retry shared reads with a personal or unknown account, disabled or removed alias, calendar alias of the same name, tampered/cross-target reference, raw `folder_id` or `message_id` plus alias, and a cancelled request. **Pass:** local denials cause zero Graph traffic; pagination and transient retries never change the owner route; existing own-mail calls remain unchanged.
 
 ### Step 30 -- Mail operations (skip if selected account has read disabled)
 

@@ -299,6 +299,9 @@ func FormatMessagesText(messages []map[string]any) string {
 		if bodyPreview != "" {
 			fmt.Fprintf(&b, "   Preview: %s\n", bodyPreview)
 		}
+		if reference, _ := m["resource_ref"].(string); reference != "" {
+			fmt.Fprintf(&b, "   Resource Ref: %s\n", reference)
+		}
 
 		// Blank line between messages.
 		if i < len(messages)-1 {
@@ -409,6 +412,9 @@ func FormatMessageDetailText(message map[string]any) string {
 	// configured and the field is present on the message map).
 	if prov, ok := message["provenance"].(bool); ok && prov {
 		b.WriteString("[Created by this MCP server]\n")
+	}
+	if reference, _ := message["resource_ref"].(string); reference != "" {
+		fmt.Fprintf(&b, "Resource Ref: %s\n", reference)
 	}
 
 	// Body preview.
@@ -609,6 +615,9 @@ func FormatMailFoldersText(folders []map[string]any) string {
 		unread := toInt(f["unreadItemCount"])
 		total := toInt(f["totalItemCount"])
 		fmt.Fprintf(&b, "%d. %s (%d unread, %d total)\n", i+1, name, unread, total)
+		if reference, _ := f["resource_ref"].(string); reference != "" {
+			fmt.Fprintf(&b, "   Resource Ref: %s\n", reference)
+		}
 	}
 
 	fmt.Fprintf(&b, "\n%d folder(s) total.", len(folders))

@@ -16,6 +16,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -78,9 +79,9 @@ func NewGetMessageTool() mcp.Tool {
 	)
 }
 
-// NewHandleGetMessage creates a tool handler that retrieves full message
-// details by ID by calling GET /me/messages/{id} via the Graph SDK. The Graph
-// client is retrieved from the request context at invocation time.
+// NewHandleGetMessage creates a handler that retrieves one message through the
+// exact own or authorized shared owner root. Shared calls consume verified
+// target-bound provenance instead of raw message IDs.
 //
 // Parameters:
 //   - retryCfg: retry configuration for transient Graph API errors.
@@ -90,20 +91,20 @@ func NewGetMessageTool() mcp.Tool {
 //     extended property and each output mode includes a "provenance" boolean.
 //
 // Returns a tool handler function compatible with the MCP server's AddTool method.
-func NewHandleGetMessage(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleGetMessage(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
 
 		// Extract and validate required message_id parameter.
-		messageID, err := request.RequireString("message_id")
-		if err != nil || messageID == "" {
-			return mcp.NewToolResultError("missing required parameter: message_id. Tip: Use mail_list_messages or mail_search_messages to find the message ID."), nil
+		messageID, err := target.messageID(request.GetString("message_id", ""))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -149,7 +150,7 @@ func NewHandleGetMessage(retryCfg graph.RetryConfig, timeout time.Duration, prov
 		var msg models.Messageable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			msg, graphErr = client.Me().Messages().ByMessageId(messageID).Get(timeoutCtx, cfg)
+			msg, graphErr = target.root.Messages().ByMessageId(messageID).Get(timeoutCtx, cfg)
 			return graphErr
 		})
 		if err != nil {
@@ -163,7 +164,7 @@ func NewHandleGetMessage(retryCfg graph.RetryConfig, timeout time.Duration, prov
 				"error", graph.FormatGraphError(err),
 				"message_id", messageID,
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		logger.Debug("graph API response",
@@ -181,8 +182,12 @@ func NewHandleGetMessage(retryCfg graph.RetryConfig, timeout time.Duration, prov
 		// Provenance: include a boolean indicating whether the message carries
 		// the configured provenance extended property. Only emitted when
 		// provenance tagging is configured on the server.
-		if provenancePropertyID != "" {
+		if provenancePropertyID != "" && (!target.isShared() || outputMode != "raw") {
 			result["provenance"] = graph.HasMessageProvenanceTag(msg, provenancePropertyID)
+		}
+		wrapped, err := addSharedMailReference(result, target, referenceCodec(codecs), outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		// Return text output when requested.
@@ -193,7 +198,7 @@ func NewHandleGetMessage(retryCfg graph.RetryConfig, timeout time.Duration, prov
 			return mcp.NewToolResultText(FormatMessageDetailText(result)), nil
 		}
 
-		jsonBytes, err := json.Marshal(result)
+		jsonBytes, err := json.Marshal(wrapped)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),

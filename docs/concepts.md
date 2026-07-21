@@ -98,6 +98,8 @@ New aliases start with all eight actions disabled: `read`, `draft`, `move`, `arc
 
 Shared read contributes `Mail.Read.Shared`. Draft, filing, recovery, deletion, or send contributes `Mail.ReadWrite.Shared`; send also contributes `Mail.Send.Shared`. The server disconnects the account only when changing an alias alters the complete account-wide scope union. OAuth consent never authorizes an action disabled by the selected alias policy.
 
+With `read` enabled, `mail.list_folders`, `mail.list_messages`, and `mail.get_message` accept `shared_resource` and route only through `/users/{owner}/...`. Shared folder and message text/summary results include signed target-bound references. To scope shared `list_messages`, pass the `folder_ref` returned by `list_folders`; raw `folder_id` plus alias is rejected. Shared `get_message` similarly requires the `resource_ref` returned by `list_messages` and rejects raw `message_id`. Raw output keeps Graph-derived data under `data` and returns local references in a separate `provenance` sidecar. References bind the account, immutable mailbox identity, owner view, item kind, and Graph ID, and are revalidated against current policy on every use. Omitting `shared_resource` preserves existing own-mail `/me` behavior and output shapes.
+
 ## Local draft attachments
 
 `mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.

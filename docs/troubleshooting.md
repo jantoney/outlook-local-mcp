@@ -327,6 +327,12 @@ Shared-mail configuration and use require authoritative token evidence for an or
 
 **Remedy:** Confirm `token_tenant_context` with `account.list` or `system.status`. Reconnect the intended work or school account if validated tenant evidence is missing. Configure the alias under that account and separately verify Exchange Full Access, folder delegation, or Send As/Send on Behalf rights as required. Removing an invalid local alias remains available without Graph traffic.
 
+## Shared mail reference is rejected {#shared-mail-reference-rejected}
+
+A shared folder or message reference is valid only for the account, immutable mailbox resource, owner view, item kind, and Graph ID from which it was issued. Raw `folder_id` or `message_id` plus `shared_resource`, cross-mailbox references, disabled read policy, removed aliases, and recreated aliases fail locally before Graph.
+
+**Remedy:** Confirm the organizational account and alias with `account.list_mail_aliases`, ensure only the intended alias has `read` enabled, and obtain fresh references from `mail.list_folders` or `mail.list_messages` on that exact alias. If the exact owner route is denied, verify Exchange mailbox or folder delegation separately; broader OAuth consent does not create mailbox access.
+
 ---
 
 ## In-server documentation access

@@ -15,6 +15,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
@@ -49,9 +50,8 @@ func NewListMailFoldersTool() mcp.Tool {
 	)
 }
 
-// NewHandleListMailFolders creates a tool handler that lists mail folders for
-// the authenticated user by calling GET /me/mailFolders via the Graph SDK.
-// The Graph client is retrieved from the request context at invocation time.
+// NewHandleListMailFolders creates a handler that lists folders from the exact
+// own or authorized shared owner-view root and signs shared folder provenance.
 //
 // Parameters:
 //   - retryCfg: retry configuration for transient Graph API errors.
@@ -60,9 +60,9 @@ func NewListMailFoldersTool() mcp.Tool {
 // Returns a tool handler function compatible with the MCP server's AddTool method.
 //
 // The handler:
-//   - Retrieves the Graph client from context via GraphClient.
+//   - Retrieves the guarded typed mail root from context.
 //   - Applies a timeout context before the Graph API call.
-//   - Calls client.Me().MailFolders().Get(ctx, cfg) with $top and $select.
+//   - Calls the selected root's MailFolders().Get with $top and $select.
 //   - Serializes each folder into a map with keys: id, displayName,
 //     unreadItemCount, and totalItemCount.
 //   - Returns the JSON array via mcp.NewToolResultText.
@@ -70,14 +70,14 @@ func NewListMailFoldersTool() mcp.Tool {
 //   - Returns Graph API errors via mcp.NewToolResultError with RedactGraphError.
 //   - Logs entry at debug level, completion at info level with duration and count,
 //     and errors at error level.
-func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
 		logger.Debug("tool called")
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
@@ -113,7 +113,7 @@ func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration)
 		var resp models.MailFolderCollectionResponseable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			resp, graphErr = client.Me().MailFolders().Get(timeoutCtx, cfg)
+			resp, graphErr = target.root.MailFolders().Get(timeoutCtx, cfg)
 			return graphErr
 		})
 		if err != nil {
@@ -126,7 +126,7 @@ func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration)
 			logger.Error("graph API call failed",
 				"error", graph.FormatGraphError(err),
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		logger.Debug("graph API response",
@@ -138,6 +138,10 @@ func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration)
 		for _, folder := range folders {
 			results = append(results, serializeMailFolder(folder))
 		}
+		wrapped, err := addSharedMailReferences(results, target, referenceCodec(codecs), resource.ItemKindMailFolder, outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Return text output when requested.
 		if outputMode == "text" {
@@ -147,7 +151,7 @@ func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration)
 			return mcp.NewToolResultText(FormatMailFoldersText(results)), nil
 		}
 
-		jsonBytes, err := json.Marshal(results)
+		jsonBytes, err := json.Marshal(wrapped)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),
