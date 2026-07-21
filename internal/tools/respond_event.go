@@ -83,6 +83,9 @@ func NewRespondEventTool() mcp.Tool {
 func HandleRespondEvent(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
+		if err := rejectSharedMeetingRoute(request); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		client, err := GraphClient(ctx)
 		if err != nil {

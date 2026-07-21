@@ -284,12 +284,17 @@ flowchart LR
 | Resource view | Read | Write | Delivery |
 |---|---|---|---|
 | Owner-primary calendar | list/get/search events | not supported | not applicable |
-| Recipient-mounted calendar | list/get/search events | create, update, reschedule, delete for organizational contexts | not applicable |
+| Recipient-mounted calendar | list/get/search events | create, update, reschedule, delete for organizational contexts when Graph explicitly reports zero attendees and `isOnlineMeeting=false` | not applicable |
 | Shared mailbox | independently gated folders, messages, search, conversations, and attachments | independently gated drafts, attachments, move, Archive, trash, restore, and permanent delete per CR-0068 | independently gated send of an existing reviewed draft |
 
 Shared meeting delegation actions such as responding to invitations on behalf
 of another user are excluded from this CR because their organizer/delegate
 semantics require a separate safety design.
+
+For the mounted-management boundary, a non-meeting event has zero attendees
+and explicitly reports `isOnlineMeeting=false`. Missing online classification
+fails closed. Mounted creation and update cannot enable online-meeting
+capability; own-calendar Teams behavior remains unchanged.
 
 ## Affected Components
 

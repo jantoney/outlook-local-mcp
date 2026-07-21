@@ -58,7 +58,7 @@
   "tools": [
     {
       "name": "calendar",
-      "description": "Calendar operations for Microsoft Outlook via Microsoft Graph. Owner-primary and explicitly selected mounted calendar list/get/search reads use account-scoped aliases, exact mailbox-view routes, and signed target-bound event references; omitting an alias preserves own-calendar behavior. Required operation: help (detailed docs), list_calendars, list_events, get_event, search_events, create_event, update_event, delete_event, respond_event, reschedule_event, create_meeting, update_meeting, cancel_meeting, reschedule_meeting, get_free_busy."
+      "description": "Calendar operations for Microsoft Outlook via Microsoft Graph. Owner-primary and explicitly selected mounted calendar list/get/search reads use account-scoped aliases, exact mailbox-view routes, and signed target-bound event references. Organizational mounted aliases with manage capability also support create/update/reschedule/delete only when Graph explicitly reports zero attendees and no online-meeting capability, on the exact recipient-view route; shared meeting actions remain excluded. Omitting an alias preserves own-calendar behavior. Required operation: help (detailed docs), list_calendars, list_events, get_event, search_events, create_event, update_event, delete_event, respond_event, reschedule_event, create_meeting, update_meeting, cancel_meeting, reschedule_meeting, get_free_busy."
     },
     {
       "name": "mail",

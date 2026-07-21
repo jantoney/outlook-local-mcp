@@ -16,10 +16,10 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
-	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // NewRescheduleEventTool creates the MCP tool definition for reschedule_event.
@@ -80,22 +80,23 @@ var rescheduleSelectFields = []string{"id", "start", "end"}
 // containing the rescheduled event details, or an error result when validation
 // or Graph API calls fail.
 //
-// Side effects: calls GET /me/events/{id} and PATCH /me/events/{id} on the
-// Microsoft Graph API (at most 2 calls per invocation). Logs at debug level on
-// entry, error level on failure, and info level on success.
-func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls GET and PATCH on the exact own or authorized mounted
+// event route. Mounted requests classify the event and revalidate authority
+// between stages. Logs at debug level on entry, error level on failure, and
+// info level on success.
+func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 
-		client, err := GraphClient(ctx)
+		target, err := calendarTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
 
 		// Extract and validate required parameters.
-		eventID, err := request.RequireString("event_id")
+		eventID, err := target.eventID(request.GetString("event_id", ""))
 		if err != nil {
-			return mcp.NewToolResultError("missing required parameter: event_id. Tip: Use calendar_list_events or calendar_search_events to find the event ID."), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(eventID, "event_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -126,19 +127,13 @@ func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, de
 		)
 
 		// Step 1: GET the existing event to retrieve current start/end.
-		getCfg := &users.ItemEventsEventItemRequestBuilderGetRequestConfiguration{
-			QueryParameters: &users.ItemEventsEventItemRequestBuilderGetQueryParameters{
-				Select: rescheduleSelectFields,
-			},
-		}
-
 		getCtx, getCancel := graph.WithTimeout(ctx, timeout)
 		defer getCancel()
 
 		var existing models.Eventable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			existing, graphErr = client.Me().Events().ByEventId(eventID).Get(getCtx, getCfg)
+			existing, graphErr = getCalendarEvent(getCtx, target, eventID, append(append([]string(nil), rescheduleSelectFields...), "attendees", "isOnlineMeeting"))
 			return graphErr
 		})
 		if err != nil {
@@ -154,6 +149,11 @@ func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, de
 			return mcp.NewToolResultError(
 				fmt.Sprintf("failed to retrieve event: %s. Tip: Use calendar_list_events or calendar_search_events to verify the event ID.",
 					graph.RedactGraphError(err))), nil
+		}
+		if target.isShared() {
+			if err := requireMountedNonMeeting(existing); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 		}
 
 		// Extract current start/end datetimes and compute duration.
@@ -194,11 +194,16 @@ func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, de
 
 		patchCtx, patchCancel := graph.WithTimeout(ctx, timeout)
 		defer patchCancel()
+		if target.isShared() {
+			if err := revalidateCalendarTarget(ctx); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
 
 		var updatedEvent models.Eventable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			updatedEvent, graphErr = client.Me().Events().ByEventId(eventID).Patch(patchCtx, event, nil)
+			updatedEvent, graphErr = patchCalendarEvent(patchCtx, target, eventID, event)
 			return graphErr
 		})
 		if err != nil {
@@ -211,7 +216,7 @@ func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, de
 			logger.ErrorContext(ctx, "reschedule event failed",
 				"event_id", eventID,
 				"error", graph.FormatGraphError(err))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		logger.InfoContext(ctx, "event rescheduled",
@@ -226,6 +231,10 @@ func HandleRescheduleEvent(retryCfg graph.RetryConfig, timeout time.Duration, de
 		eventLocation := extractEventLocation(updatedEvent)
 
 		response := FormatWriteConfirmation("rescheduled", eventSubject, eventID, displayTime, eventLocation)
+		response, err = appendSharedEventReference(response, target, referenceCodec(codecs), eventID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line
 		}

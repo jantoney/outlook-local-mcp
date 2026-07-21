@@ -18,6 +18,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -127,18 +128,21 @@ func NewCreateEventTool() mcp.Tool {
 //
 // Returns a closure matching the MCP tool handler function signature.
 //
-// Side effects: calls POST /me/events or POST /me/calendars/{id}/events on the
-// Microsoft Graph API. Logs at debug level on entry, error level on failure,
-// and info level on success.
-func HandleCreateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls POST on the exact own or authorized mounted event
+// collection. Mounted requests cannot enable online meetings. Logs at debug
+// level on entry, error level on failure, and info level on success.
+func HandleCreateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		args := request.GetArguments()
 		logger.DebugContext(ctx, "tool called", "params", args)
 
-		client, err := GraphClient(ctx)
+		target, err := calendarTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
+		}
+		if err := rejectMountedOnlineMeetingInput(target, request); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		// Extract required parameters.
@@ -338,22 +342,21 @@ func HandleCreateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
 
+		calID, _ := args["calendar_id"].(string)
+		if target.isShared() && calID != "" {
+			return mcp.NewToolResultError("shared mounted create does not accept calendar_id"), nil
+		}
 		var createdEvent models.Eventable
-		if calID, ok := args["calendar_id"].(string); ok && calID != "" {
+		if calID != "" {
 			logger.DebugContext(ctx, "creating event in calendar", "calendar_id", calID)
-			err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-				var graphErr error
-				createdEvent, graphErr = client.Me().Calendars().ByCalendarId(calID).Events().Post(timeoutCtx, event, nil)
-				return graphErr
-			})
 		} else {
 			logger.DebugContext(ctx, "creating event in default calendar")
-			err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-				var graphErr error
-				createdEvent, graphErr = client.Me().Events().Post(timeoutCtx, event, nil)
-				return graphErr
-			})
 		}
+		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
+			var graphErr error
+			createdEvent, graphErr = createCalendarEvent(timeoutCtx, target, calID, event)
+			return graphErr
+		})
 		if err != nil {
 			if graph.IsTimeoutError(err) {
 				logger.ErrorContext(ctx, "request timed out",
@@ -374,6 +377,10 @@ func HandleCreateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		eventLocation := extractEventLocation(createdEvent)
 
 		response := FormatWriteConfirmation("created", eventSubject, eventID, displayTime, eventLocation)
+		response, err = appendSharedEventReference(response, target, referenceCodec(codecs), eventID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Append advisory when attendees are present but body or location is missing.
 		attendeesStr, _ := args["attendees"].(string)

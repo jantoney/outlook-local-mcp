@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/desek/outlook-local-mcp/internal/resource"
 	graphusers "github.com/microsoftgraph/msgraph-sdk-go/users"
@@ -16,6 +17,21 @@ type RoutedTarget struct {
 	Root *graphusers.UserItemRequestBuilder
 	// Claims is verified signed provenance, or nil for collection operations.
 	Claims *resource.ReferenceClaims
+	// Reauthorize rechecks current registry identity, compatibility, capability,
+	// provenance, client, and route equality before a later committed stage.
+	Reauthorize func() error
+}
+
+// Revalidate rechecks current local authority before another independently
+// committable Graph stage. A missing callback fails closed for shared targets.
+func (target RoutedTarget) Revalidate() error {
+	if target.Reauthorize != nil {
+		return target.Reauthorize()
+	}
+	if target.Target.Alias != "" {
+		return fmt.Errorf("shared target reauthorization is unavailable")
+	}
+	return nil
 }
 
 type routedTargetKeyType struct{}

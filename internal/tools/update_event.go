@@ -17,6 +17,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -118,28 +119,32 @@ func NewUpdateEventTool() mcp.Tool {
 //
 // Returns a closure matching the MCP tool handler function signature.
 //
-// Side effects: calls PATCH /me/events/{id} on the Microsoft Graph API. Logs at
-// debug level on entry, error level on failure, and info level on success.
-func HandleUpdateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls PATCH on the exact own or authorized mounted event. A
+// mounted request first reads event classification and revalidates authority.
+// Logs at debug level on entry, error level on failure, and info level on
+// success.
+func HandleUpdateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		args := request.GetArguments()
 		logger.DebugContext(ctx, "tool called", "params", args)
 
-		client, err := GraphClient(ctx)
+		target, err := calendarTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
+		if err := rejectMountedOnlineMeetingInput(target, request); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
-		// Extract required event_id.
-		eventID, err := request.RequireString("event_id")
+		// Own writes retain raw IDs; shared writes consume verified references.
+		eventID, err := target.eventID(request.GetString("event_id", ""))
 		if err != nil {
-			return mcp.NewToolResultError("missing required parameter: event_id. Tip: Use calendar_list_events or calendar_search_events to find the event ID."), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(eventID, "event_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		// Validate optional parameters before processing.
 		if subject, ok := args["subject"].(string); ok {
 			if err := validate.ValidateStringLength(subject, "subject", validate.MaxSubjectLen); err != nil {
@@ -322,7 +327,27 @@ func HandleUpdateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 			event.SetIsReminderOn(&isRemOn)
 		}
 
-		// Call PATCH /me/events/{id} with timeout.
+		if target.isShared() {
+			preflightCtx, preflightCancel := graph.WithTimeout(ctx, timeout)
+			defer preflightCancel()
+			var existing models.Eventable
+			err = graph.RetryGraphCall(ctx, retryCfg, func() error {
+				var graphErr error
+				existing, graphErr = getCalendarEvent(preflightCtx, target, eventID, []string{"id", "attendees", "isOnlineMeeting"})
+				return graphErr
+			})
+			if err != nil {
+				return mcp.NewToolResultError(target.graphError(err)), nil
+			}
+			if err := requireMountedNonMeeting(existing); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if err := revalidateCalendarTarget(ctx); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
+
+		// Call PATCH on the exact routed event with timeout.
 		logger.DebugContext(ctx, "updating event", "event_id", eventID)
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -330,7 +355,7 @@ func HandleUpdateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		var updatedEvent models.Eventable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			updatedEvent, graphErr = client.Me().Events().ByEventId(eventID).Patch(timeoutCtx, event, nil)
+			updatedEvent, graphErr = patchCalendarEvent(timeoutCtx, target, eventID, event)
 			return graphErr
 		})
 		if err != nil {
@@ -341,7 +366,7 @@ func HandleUpdateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 			}
 			logger.ErrorContext(ctx, "update event failed", "event_id", eventID, "error", graph.FormatGraphError(err))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		logger.InfoContext(ctx, "event updated", "event_id", eventID)
@@ -352,6 +377,10 @@ func HandleUpdateEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		eventLocation := extractEventLocation(updatedEvent)
 
 		response := FormatWriteConfirmation("updated", eventSubject, eventID, displayTime, eventLocation)
+		response, err = appendSharedEventReference(response, target, referenceCodec(codecs), eventID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Append advisory when attendees parameter was provided and non-empty
 		// but body or location is missing.

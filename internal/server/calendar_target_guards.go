@@ -25,3 +25,26 @@ func calendarSharedGetGuard() TargetGuardConfig {
 	config.ItemKind = resource.ItemKindEvent
 	return config
 }
+
+// calendarMountedManageGuard authorizes existing own writes and organizational
+// mounted-calendar writes with exact manage capability.
+func calendarMountedManageGuard() TargetGuardConfig {
+	return TargetGuardConfig{
+		Family: resource.TargetFamilyCalendar, Capability: resource.TargetCapabilityManage,
+		AllowedKinds: []resource.ResourceKind{
+			resource.ResourceKindOwnCalendar,
+			resource.ResourceKindMountedCalendar,
+		},
+	}
+}
+
+// calendarMountedManageEventGuard requires target-bound provenance only for
+// shared mounted follow-up writes while preserving own raw event IDs.
+func calendarMountedManageEventGuard() TargetGuardConfig {
+	config := calendarMountedManageGuard()
+	config.ReferenceArgument = "resource_ref"
+	config.RequireSharedReference = true
+	config.RawIDArgument = "event_id"
+	config.ItemKind = resource.ItemKindEvent
+	return config
+}

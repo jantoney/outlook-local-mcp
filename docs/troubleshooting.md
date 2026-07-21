@@ -313,6 +313,12 @@ A shared event reference is valid only for the account, immutable calendar resou
 
 **Remedy:** Confirm the intended account and alias still exist with `account.list_calendar_aliases`, then call `calendar.list_events` or `calendar.search_events` again for that exact target and use the newly returned `resource_ref`. If Graph denies the owner route, verify the owner shared or delegated the primary calendar to the signed-in organizational account; OAuth consent alone does not create Exchange access.
 
+## Mounted calendar write is rejected {#mounted-calendar-write-rejected}
+
+Mounted create, update, reschedule, and delete require a validated organizational account, a mounted alias with profile `manage`, an editable Exchange mount, and read-only mode disabled. Follow-up writes also require a current `resource_ref`. Eligible events must have zero attendees and explicitly report `isOnlineMeeting=false`; missing classification, attendee-bearing events, and online-enabled events are rejected before mutation. Mounted create and update cannot enable online meetings. Shared response and cancellation operations are not supported. A local policy, alias, connection, or route change after preflight also stops the pending mutation.
+
+**Remedy:** Confirm the account and alias with `account.list_calendar_aliases`, restore the intended manage profile if appropriate, reconnect when the scope union changed, and obtain a fresh reference from `calendar.list_events` or `calendar.search_events`. Manage attendee-bearing or online-enabled meetings from the organizer's own calendar with the meeting-specific verbs. Do not remove attendees or attempt to set `is_online_meeting=false` merely to bypass the boundary.
+
 ---
 
 ## Shared mailbox is incompatible {#shared-mail-incompatible}

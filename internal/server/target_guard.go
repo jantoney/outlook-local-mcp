@@ -9,6 +9,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 )
 
 // TargetGuardConfig declares the exact resource family, capability, and signed
@@ -48,14 +49,6 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 		if !ok || accountInfo.Label == "" {
 			return mcp.NewToolResultError("resolved target requires a selected account"), nil
 		}
-		entry, ok := registry.Get(accountInfo.Label)
-		if !ok {
-			return mcp.NewToolResultError(fmt.Sprintf("account %q not found", accountInfo.Label)), nil
-		}
-		if entry.Client == nil {
-			return mcp.NewToolResultError(fmt.Sprintf("account %q has no Graph client", entry.Label)), nil
-		}
-
 		sharedResource := request.GetString("shared_resource", "")
 		requireReference := config.RequireReference || (config.RequireSharedReference && sharedResource != "")
 		if sharedResource != "" && config.RawIDArgument != "" && request.GetString(config.RawIDArgument, "") != "" {
@@ -69,18 +62,19 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 		if referenceArgument != "" {
 			reference = request.GetString(referenceArgument, "")
 		}
-		resolved, err := auth.ResolveTarget(entry, auth.TargetRequest{
+		targetRequest := auth.TargetRequest{
 			Family: config.Family, SharedResource: sharedResource,
 			Capability: config.Capability, Reference: reference,
 			RequireReference: requireReference, ItemKind: config.ItemKind,
-		}, codec)
+		}
+		resolved, client, err := registry.ResolveRegisteredTarget(accountInfo.Label, targetRequest, codec)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if !targetKindAllowed(resolved.Target.Kind, config.AllowedKinds) {
 			return mcp.NewToolResultError(fmt.Sprintf("resource kind %q is not supported by this operation", resolved.Target.Kind)), nil
 		}
-		root, err := graph.SelectUserRoot(entry.Client, resolved.Target)
+		root, err := graph.SelectUserRoot(client, resolved.Target)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -92,8 +86,27 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 		})
 		ctx = graph.WithRoutedTarget(ctx, graph.RoutedTarget{
 			Target: resolved.Target, Root: root, Claims: resolved.Claims,
+			Reauthorize: targetReauthorizer(registry, accountInfo.Label, client, targetRequest, codec, resolved.Target),
 		})
 		return handler(ctx, request)
+	}
+}
+
+// targetReauthorizer returns a request-local callback that proves current
+// authority and route identity again before a later committed Graph stage.
+func targetReauthorizer(registry *auth.AccountRegistry, label string, originalClient *msgraphsdk.GraphServiceClient, request auth.TargetRequest, codec *resource.ReferenceCodec, target resource.Target) func() error {
+	return func() error {
+		resolved, currentClient, err := registry.ResolveRegisteredTarget(label, request, codec)
+		if err != nil {
+			return fmt.Errorf("target authority changed before dispatch: %w", err)
+		}
+		if currentClient != originalClient {
+			return fmt.Errorf("account %q connection changed before dispatch", label)
+		}
+		if resolved.Target != target {
+			return fmt.Errorf("target route changed before dispatch")
+		}
+		return nil
 	}
 }
 

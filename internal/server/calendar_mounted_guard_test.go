@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/desek/outlook-local-mcp/internal/auth"
+	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -79,8 +81,127 @@ func TestMountedCalendarReadCompatibility(t *testing.T) {
 	}
 }
 
+// TestMountedCalendarManageGuardFailsClosed verifies compatibility, profile,
+// provenance, and raw-ID failures stop before the handler and transport.
+func TestMountedCalendarManageGuardFailsClosed(t *testing.T) {
+	var handlerCalls atomic.Int32
+	var transportCalls atomic.Int32
+	client, server := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		transportCalls.Add(1)
+	}))
+	defer server.Close()
+	inner := mcpserver.ToolHandlerFunc(func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handlerCalls.Add(1)
+		return mcp.NewToolResultText("unexpected"), nil
+	})
+	tests := []struct {
+		name    string
+		tenant  auth.TokenTenantContext
+		profile resource.CalendarProfile
+		args    map[string]any
+	}{
+		{"personal tenant", auth.TokenTenantPersonal, resource.CalendarProfileManage, map[string]any{"shared_resource": "team-mount"}},
+		{"unknown tenant", auth.TokenTenantUnknown, resource.CalendarProfileManage, map[string]any{"shared_resource": "team-mount"}},
+		{"read profile", auth.TokenTenantOrganizational, resource.CalendarProfileRead, map[string]any{"shared_resource": "team-mount"}},
+		{"missing reference", auth.TokenTenantOrganizational, resource.CalendarProfileManage, map[string]any{"shared_resource": "team-mount"}},
+		{"raw ID", auth.TokenTenantOrganizational, resource.CalendarProfileManage, map[string]any{"shared_resource": "team-mount", "event_id": "event-1"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			registry, entry, target, codec := mountedGuardFixtureWithProfile(t, client, test.tenant, test.profile)
+			if test.name != "missing reference" && test.name != "raw ID" {
+				claims := guardedOwnerEventClaims(target)
+				reference, err := codec.Sign(claims)
+				if err != nil {
+					t.Fatalf("Sign() error = %v", err)
+				}
+				test.args["resource_ref"] = reference
+			}
+			result, err := ResolvedTargetGuard(registry, calendarMountedManageEventGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(test.args))
+			if err != nil || !result.IsError {
+				t.Fatalf("guard result = %+v, error = %v", result, err)
+			}
+		})
+	}
+	if handlerCalls.Load() != 0 || transportCalls.Load() != 0 {
+		t.Fatalf("handler calls = %d, transport calls = %d; want zero", handlerCalls.Load(), transportCalls.Load())
+	}
+}
+
+// TestMountedCalendarManageReauthorizationReadsCurrentPolicy verifies the
+// middleware callback catches a profile downgrade after initial resolution.
+func TestMountedCalendarManageReauthorizationReadsCurrentPolicy(t *testing.T) {
+	client, server := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	registry, entry, target, codec := mountedGuardFixtureWithProfile(t, client, auth.TokenTenantOrganizational, resource.CalendarProfileManage)
+	claims := guardedOwnerEventClaims(target)
+	reference, err := codec.Sign(claims)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	inner := mcpserver.ToolHandlerFunc(func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := registry.Update(entry.Label, func(current *auth.AccountEntry) {
+			current.CalendarAliases[0].Profile = resource.CalendarProfileRead
+		}); err != nil {
+			t.Fatalf("registry.Update() error = %v", err)
+		}
+		routed, ok := graph.RoutedTargetFromContext(ctx)
+		if !ok {
+			t.Fatal("routed target missing")
+		}
+		if err := routed.Revalidate(); err == nil || !strings.Contains(err.Error(), "authority changed") {
+			t.Fatalf("Revalidate() error = %v", err)
+		}
+		return mcp.NewToolResultText("checked"), nil
+	})
+	args := map[string]any{"shared_resource": "team-mount", "resource_ref": reference}
+	result, err := ResolvedTargetGuard(registry, calendarMountedManageEventGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(args))
+	if err != nil || result.IsError {
+		t.Fatalf("guard result = %+v, error = %v", result, err)
+	}
+}
+
+// TestMountedCalendarManageReauthorizationDetectsClientSwap verifies a new
+// connection cannot inherit authority captured for the prior Graph client.
+func TestMountedCalendarManageReauthorizationDetectsClientSwap(t *testing.T) {
+	client, server := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	replacement, replacementServer := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer replacementServer.Close()
+	registry, entry, target, codec := mountedGuardFixtureWithProfile(t, client, auth.TokenTenantOrganizational, resource.CalendarProfileManage)
+	claims := guardedOwnerEventClaims(target)
+	reference, err := codec.Sign(claims)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	inner := mcpserver.ToolHandlerFunc(func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := registry.Update(entry.Label, func(current *auth.AccountEntry) { current.Client = replacement }); err != nil {
+			t.Fatalf("registry.Update() error = %v", err)
+		}
+		routed, ok := graph.RoutedTargetFromContext(ctx)
+		if !ok {
+			t.Fatal("routed target missing")
+		}
+		if err := routed.Revalidate(); err == nil || !strings.Contains(err.Error(), "connection changed") {
+			t.Fatalf("Revalidate() error = %v", err)
+		}
+		return mcp.NewToolResultText("checked"), nil
+	})
+	args := map[string]any{"shared_resource": "team-mount", "resource_ref": reference}
+	result, err := ResolvedTargetGuard(registry, calendarMountedManageEventGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(args))
+	if err != nil || result.IsError {
+		t.Fatalf("guard result = %+v, error = %v", result, err)
+	}
+}
+
 // mountedGuardFixture creates one read-enabled mounted alias and signer.
 func mountedGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient, tenant auth.TokenTenantContext) (*auth.AccountRegistry, *auth.AccountEntry, resource.Target, resource.ReferenceCodec) {
+	return mountedGuardFixtureWithProfile(t, client, tenant, resource.CalendarProfileRead)
+}
+
+// mountedGuardFixtureWithProfile creates one mounted alias with an exact
+// profile for read and manage authorization tests.
+func mountedGuardFixtureWithProfile(t *testing.T, client *msgraphsdk.GraphServiceClient, tenant auth.TokenTenantContext, profile resource.CalendarProfile) (*auth.AccountRegistry, *auth.AccountEntry, resource.Target, resource.ReferenceCodec) {
 	t.Helper()
 	key, err := resource.LoadOrCreateSigningKey(filepath.Join(t.TempDir(), "reference.key"))
 	if err != nil {
@@ -88,7 +209,7 @@ func mountedGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient, te
 	}
 	alias, err := resource.NewMountedCalendar(
 		resource.ResourceID("55555555-5555-4555-8555-555555555555"),
-		"team-mount", "owner@example.com", "mounted-id", resource.CalendarProfileRead,
+		"team-mount", "owner@example.com", "mounted-id", profile,
 	)
 	if err != nil {
 		t.Fatalf("NewMountedCalendar() error = %v", err)
@@ -107,6 +228,13 @@ func mountedGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient, te
 		t.Fatalf("TargetFromCalendarAlias() error = %v", err)
 	}
 	return registry, entry, target, resource.NewReferenceCodec(key)
+}
+
+// requestWithArguments constructs one MCP request for middleware tests.
+func requestWithArguments(arguments map[string]any) mcp.CallToolRequest {
+	request := mcp.CallToolRequest{}
+	request.Params.Arguments = arguments
+	return request
 }
 
 // mountedForeignClaims creates valid event provenance from a different view.

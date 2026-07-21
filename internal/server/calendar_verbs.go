@@ -339,14 +339,14 @@ func buildSearchEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov
 func buildCreateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
 	return tools.Verb{
 		Name:        "create_event",
-		Summary:     "create a personal calendar event (no attendees); use create_meeting for meetings",
-		Description: "Creates a new personal calendar event with no attendees. For events with attendees that require invitation emails, use create_meeting instead. Supports all-day events, recurrence, Teams online meetings (work/school accounts), categories, reminders, and custom importance/sensitivity. Times must be supplied in ISO 8601 format without a UTC offset (the server applies the configured or specified timezone).",
+		Summary:     "create an own or managed mounted non-meeting calendar event",
+		Description: "Creates a non-meeting calendar event in the own calendar or an organizational mounted calendar selected by shared_resource with manage capability. Mounted writes use only the configured recipient-view calendar ID and reject attendees and online-meeting capability. For meetings, use create_meeting on the own calendar instead. Own-calendar creation supports Teams online meetings; both routes support all-day events, recurrence, categories, reminders, and custom importance/sensitivity. Times must be supplied in ISO 8601 format without a UTC offset (the server applies the configured or specified timezone).",
 		Examples: []tools.Example{
 			{Args: map[string]any{"subject": "Deep work", "start_datetime": "2026-04-28T09:00:00", "end_datetime": "2026-04-28T11:00:00"}, Comment: "create a two-hour focus block"},
 			{Args: map[string]any{"subject": "Team lunch", "start_datetime": "2026-04-28T12:00:00", "is_all_day": false, "location": "Canteen"}, Comment: "create a lunch event with location"},
 		},
-		SeeDocs: []string{"concepts#output-tiers"},
-		Handler: wrapWrite("calendar.create_event", "write", tools.HandleCreateEvent(rc, c.timeout, tz, prov)),
+		SeeDocs: []string{"concepts#shared-calendar-aliases", "troubleshooting#mounted-calendar-write-rejected"},
+		Handler: wrapWrite("calendar.create_event", "write", ResolvedTargetGuard(c.registry, calendarMountedManageGuard(), c.referenceCodec, tools.HandleCreateEvent(rc, c.timeout, tz, prov, c.referenceCodec))),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -354,6 +354,9 @@ func buildCreateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov 
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource",
+				mcp.Description("Optional organizational mounted-calendar alias with manage capability. Omit for own-calendar creation."),
+			),
 			mcp.WithString("subject",
 				mcp.Required(),
 				mcp.Description("Event title."),
@@ -378,7 +381,7 @@ func buildCreateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov 
 				mcp.Description("Location display name (e.g. room name, office, or \"Microsoft Teams\")."),
 			),
 			mcp.WithBoolean("is_online_meeting",
-				mcp.Description("Set true to create a Teams online meeting (work/school accounts only)."),
+				mcp.Description("Set true to create a Teams online meeting on the own calendar. Rejected with shared_resource."),
 			),
 			mcp.WithBoolean("is_all_day",
 				mcp.Description("All-day event. Start/end must be midnight in the same timezone."),
@@ -402,7 +405,7 @@ func buildCreateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov 
 				mcp.Description("Reminder minutes before start."),
 			),
 			mcp.WithString("calendar_id",
-				mcp.Description("Target calendar ID. Omit for default calendar."),
+				mcp.Description("Own target calendar ID. Rejected with shared_resource, which uses the configured mounted ID."),
 			),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Never assume a default account — always check account list first. Accepts a label (e.g. 'work') or UPN (e.g. 'user@contoso.com'). Disconnected accounts are listed but require login before use."),
@@ -415,10 +418,10 @@ func buildCreateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov 
 func buildUpdateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz string, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
 	return tools.Verb{
 		Name:        "update_event",
-		Summary:     "update a personal event (PATCH); use update_meeting to change attendees",
-		Description: "Updates fields of an existing personal calendar event using PATCH semantics: only supplied fields are changed. Attendee changes are not supported; use update_meeting for meetings with attendees. Recurrence changes apply to the series master only.",
-		SeeDocs:     []string{"concepts#output-tiers"},
-		Handler:     wrapWrite("calendar.update_event", "write", tools.HandleUpdateEvent(rc, c.timeout, tz)),
+		Summary:     "update an own or managed mounted non-meeting event (PATCH)",
+		Description: "Updates fields of an existing own-calendar or organizational mounted non-meeting event using PATCH semantics: only supplied fields are changed. Mounted writes require shared_resource plus the target-bound resource_ref returned by a mounted read and use only the configured recipient-view calendar ID. Events with attendees are rejected; use update_meeting on the own calendar for meetings. Recurrence changes apply to the series master only.",
+		SeeDocs:     []string{"concepts#shared-calendar-aliases", "troubleshooting#mounted-calendar-write-rejected"},
+		Handler:     wrapWrite("calendar.update_event", "write", ResolvedTargetGuard(c.registry, calendarMountedManageEventGuard(), c.referenceCodec, tools.HandleUpdateEvent(rc, c.timeout, tz, c.referenceCodec))),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -426,9 +429,12 @@ func buildUpdateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz string
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational mounted-calendar alias with manage capability. Requires resource_ref.")),
 			mcp.WithString("event_id",
-				mcp.Required(),
-				mcp.Description("The unique ID of the event to update."),
+				mcp.Description("Own-calendar event ID. Required without shared_resource and rejected for shared writes."),
+			),
+			mcp.WithString("resource_ref",
+				mcp.Description("Signed mounted-event reference required with shared_resource."),
 			),
 			mcp.WithString("subject",
 				mcp.Description("New event title."),
@@ -452,7 +458,7 @@ func buildUpdateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz string
 				mcp.Description("New location display name."),
 			),
 			mcp.WithBoolean("is_online_meeting",
-				mcp.Description("Set true to make this a Teams online meeting, or false to remove it (work/school accounts only)."),
+				mcp.Description("Set true to make an own-calendar event a Teams online meeting. True is rejected with shared_resource; an existing mounted online meeting is never eligible for management."),
 			),
 			mcp.WithBoolean("is_all_day",
 				mcp.Description("Change all-day status."),
@@ -489,10 +495,10 @@ func buildUpdateEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz string
 func buildDeleteEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
 	return tools.Verb{
 		Name:        "delete_event",
-		Summary:     "permanently delete an event by ID (organizer deletions notify attendees)",
-		Description: "Permanently deletes a calendar event. This operation is irreversible. When the authenticated user is the meeting organizer, all attendees receive a cancellation notification. To cancel a meeting without deleting it from the organizer's calendar, use cancel_meeting instead.",
-		SeeDocs:     []string{"concepts#read-only-mode"},
-		Handler:     wrapWrite("calendar.delete_event", "delete", tools.HandleDeleteEvent(rc, c.timeout)),
+		Summary:     "permanently delete an own or managed mounted non-meeting event",
+		Description: "Permanently deletes an own-calendar event or an organizational mounted non-meeting event. Mounted writes require shared_resource plus the target-bound resource_ref returned by a mounted read, use only the configured recipient-view calendar ID, and reject events with attendees. This operation is irreversible. Own-calendar organizer deletions notify attendees when applicable; shared cancel_meeting routing is not supported.",
+		SeeDocs:     []string{"concepts#read-only-mode", "concepts#shared-calendar-aliases", "troubleshooting#mounted-calendar-write-rejected"},
+		Handler:     wrapWrite("calendar.delete_event", "delete", ResolvedTargetGuard(c.registry, calendarMountedManageEventGuard(), c.referenceCodec, tools.HandleDeleteEvent(rc, c.timeout))),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(true),
@@ -500,9 +506,12 @@ func buildDeleteEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, wrapWrite
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational mounted-calendar alias with manage capability. Requires resource_ref and supports only non-meeting events.")),
 			mcp.WithString("event_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the event to delete."),
+				mcp.Description("Own-calendar event ID. Required without shared_resource and rejected for shared deletion."),
+			),
+			mcp.WithString("resource_ref",
+				mcp.Description("Signed mounted-event reference required with shared_resource."),
 			),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Never assume a default account — always check account list first. Accepts a label (e.g. 'work') or UPN (e.g. 'user@contoso.com'). Disconnected accounts are listed but require login before use."),
@@ -555,12 +564,13 @@ func buildRespondEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, wrapWrit
 func buildRescheduleEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz string, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
 	return tools.Verb{
 		Name:        "reschedule_event",
-		Summary:     "move a personal event to a new start time, preserving its original duration",
-		Description: "Moves a personal calendar event to a new start time while preserving its original duration. For meetings with attendees, use reschedule_meeting so that update notifications are sent to attendees.",
+		Summary:     "reschedule an own or managed mounted non-meeting event",
+		Description: "Moves an own-calendar or organizational mounted non-meeting event to a new start time while preserving its original duration. Mounted writes require shared_resource plus the target-bound resource_ref returned by a mounted read, use only the configured recipient-view calendar ID, and reject events with attendees. For own-calendar meetings, use reschedule_meeting so update notifications are sent.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"event_id": "<id>", "new_start_datetime": "2026-04-29T10:00:00"}, Comment: "reschedule an event to a new time"},
 		},
-		Handler: wrapWrite("calendar.reschedule_event", "write", tools.HandleRescheduleEvent(rc, c.timeout, tz)),
+		SeeDocs: []string{"concepts#shared-calendar-aliases", "troubleshooting#mounted-calendar-write-rejected"},
+		Handler: wrapWrite("calendar.reschedule_event", "write", ResolvedTargetGuard(c.registry, calendarMountedManageEventGuard(), c.referenceCodec, tools.HandleRescheduleEvent(rc, c.timeout, tz, c.referenceCodec))),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -568,9 +578,12 @@ func buildRescheduleEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz st
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational mounted-calendar alias with manage capability. Requires resource_ref.")),
 			mcp.WithString("event_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the event to reschedule."),
+				mcp.Description("Own-calendar event ID. Required without shared_resource and rejected for shared rescheduling."),
+			),
+			mcp.WithString("resource_ref",
+				mcp.Description("Signed mounted-event reference required with shared_resource."),
 			),
 			mcp.WithString("new_start_datetime",
 				mcp.Required(),
