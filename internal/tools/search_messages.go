@@ -16,6 +16,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	msgraphcore "github.com/microsoftgraph/msgraph-sdk-go-core"
@@ -139,11 +140,15 @@ Limitations:
 //   - Returns Graph API errors via mcp.NewToolResultError with RedactGraphError.
 //   - Returns timeout errors via mcp.NewToolResultError with TimeoutErrorMessage.
 //   - Logs entry at debug level, completion at info level, errors at error level.
-func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
+		target, err := mailTargetFromContext(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("no account selected"), nil
+		}
 		client, err := GraphClient(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
@@ -162,7 +167,10 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) 
 		}
 
 		// Extract and validate optional folder_id.
-		folderID := request.GetString("folder_id", "")
+		folderID, err := target.folderID(request.GetString("folder_id", ""))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		if folderID != "" {
 			if err := validate.ValidateResourceID(folderID, "folder_id"); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -214,7 +222,7 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) 
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = client.Me().MailFolders().ByMailFolderId(folderID).Messages().Get(timeoutCtx, cfg)
+				resp, err = target.root.MailFolders().ByMailFolderId(folderID).Messages().Get(timeoutCtx, cfg)
 				return err
 			})
 		} else {
@@ -233,7 +241,7 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) 
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = client.Me().Messages().Get(timeoutCtx, cfg)
+				resp, err = target.root.Messages().Get(timeoutCtx, cfg)
 				return err
 			})
 		}
@@ -248,7 +256,7 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) 
 			logger.Error("graph API call failed",
 				"error", graph.FormatGraphError(graphErr),
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(graphErr)), nil
+			return mcp.NewToolResultError(target.graphError(graphErr)), nil
 		}
 
 		logger.Debug("graph API response",
@@ -283,6 +291,10 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) 
 				"duration", time.Since(start))
 			return mcp.NewToolResultError(fmt.Sprintf("failed to iterate messages: %s", err.Error())), nil
 		}
+		wrapped, err := addSharedMailReferences(messages, target, referenceCodec(codecs), resource.ItemKindMessage, outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Return text output when requested.
 		if outputMode == "text" {
@@ -292,7 +304,7 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration) 
 			return mcp.NewToolResultText(FormatMessagesText(messages)), nil
 		}
 
-		jsonBytes, err := json.Marshal(messages)
+		jsonBytes, err := json.Marshal(wrapped)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),

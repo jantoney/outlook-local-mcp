@@ -509,6 +509,9 @@ func FormatConversationText(thread map[string]any) string {
 		if bodyPreview != "" {
 			fmt.Fprintf(&b, "   Preview: %s\n", bodyPreview)
 		}
+		if reference, _ := m["resource_ref"].(string); reference != "" {
+			fmt.Fprintf(&b, "   Resource Ref: %s\n", reference)
+		}
 
 		if i < len(messages)-1 {
 			b.WriteString("\n")
@@ -548,6 +551,9 @@ func FormatAttachmentText(att map[string]any) string {
 	} else {
 		b.WriteString("This attachment has no downloadable file content (not a file attachment).")
 	}
+	if reference, _ := att["attachment_ref"].(string); reference != "" {
+		fmt.Fprintf(&b, "\nAttachment Ref: %s", reference)
+	}
 	return b.String()
 }
 
@@ -584,6 +590,9 @@ func FormatAttachmentsText(atts []map[string]any) string {
 		fmt.Fprintf(&b, "   Size: %d bytes\n", toInt(a["size"]))
 		if inline, ok := a["isInline"].(bool); ok && inline {
 			b.WriteString("   Inline: true\n")
+		}
+		if reference, _ := a["attachment_ref"].(string); reference != "" {
+			fmt.Fprintf(&b, "   Attachment Ref: %s\n", reference)
 		}
 	}
 	fmt.Fprintf(&b, "\n%d attachment(s).", len(atts))

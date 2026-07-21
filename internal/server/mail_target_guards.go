@@ -30,3 +30,14 @@ func mailSharedMessageReadGuard() TargetGuardConfig {
 	config.ItemKind = resource.ItemKindMessage
 	return config
 }
+
+// mailSharedParentMessageGuard requires a named target-bound parent message
+// reference for shared conversation and attachment reads.
+func mailSharedParentMessageGuard(argument string) TargetGuardConfig {
+	config := mailSharedReadGuard()
+	config.ReferenceArgument = argument
+	config.RequireSharedReference = true
+	config.RawIDArgument = "message_id"
+	config.ItemKind = resource.ItemKindMessage
+	return config
+}

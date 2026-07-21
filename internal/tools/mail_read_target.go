@@ -71,6 +71,36 @@ func (target mailReadTarget) messageID(requestID string) (string, error) {
 	return target.claims.GraphIDChain[0].ID, nil
 }
 
+// attachmentID returns an own raw attachment ID or verifies a shared
+// attachment reference whose parent message matches the guarded message claim.
+func (target mailReadTarget) attachmentID(requestID, reference string, codec *resource.ReferenceCodec) (string, error) {
+	if !target.isShared() {
+		if requestID == "" {
+			return "", fmt.Errorf("missing required parameter: attachment_id")
+		}
+		return requestID, nil
+	}
+	if requestID != "" {
+		return "", fmt.Errorf("shared mailbox attachment download requires attachment_ref and does not accept attachment_id")
+	}
+	if reference == "" || codec == nil {
+		return "", fmt.Errorf("shared mailbox attachment download requires a verified attachment_ref")
+	}
+	claims, err := codec.Verify(reference)
+	if err != nil {
+		return "", err
+	}
+	if claims.AccountID != target.target.AccountID || claims.ResourceID != target.target.ResourceID ||
+		claims.ResourceKind != target.target.Kind || claims.MailboxView != target.target.View ||
+		claims.ItemKind != resource.ItemKindAttachment || len(claims.GraphIDChain) != 2 {
+		return "", fmt.Errorf("attachment reference does not match the resolved shared mailbox")
+	}
+	if target.claims == nil || len(target.claims.GraphIDChain) != 1 || claims.GraphIDChain[0].ID != target.claims.GraphIDChain[0].ID {
+		return "", fmt.Errorf("attachment reference does not match the verified parent message")
+	}
+	return claims.GraphIDChain[1].ID, nil
+}
+
 // graphError returns a redacted Graph error without route fallback.
 func (target mailReadTarget) graphError(err error) string {
 	if !target.isShared() {

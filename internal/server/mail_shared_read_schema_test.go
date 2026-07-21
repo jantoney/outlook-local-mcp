@@ -19,7 +19,7 @@ func TestSharedMailReadSchemaIsStatic(t *testing.T) {
 		registry: auth.NewAccountRegistry(), retryCfg: graph.RetryConfig{}, cfg: config.Config{},
 		authMW: identity, accountResolverMW: identity,
 	})
-	for _, name := range []string{"list_folders", "list_messages", "get_message"} {
+	for _, name := range []string{"list_folders", "list_messages", "get_message", "search_messages", "get_conversation", "list_attachments", "get_attachment"} {
 		verb := calendarVerbByName(t, verbs, name)
 		tool := mcp.NewTool(name, verb.Schema...)
 		if _, ok := tool.InputSchema.Properties["shared_resource"]; !ok {
@@ -28,9 +28,9 @@ func TestSharedMailReadSchemaIsStatic(t *testing.T) {
 		if !strings.Contains(verb.Description, "shared") && !strings.Contains(verb.Description, "owner") {
 			t.Fatalf("%s help omits shared owner routing: %s", name, verb.Description)
 		}
-		if name == "list_messages" {
+		if name == "list_messages" || name == "search_messages" {
 			if _, ok := tool.InputSchema.Properties["folder_ref"]; !ok {
-				t.Fatal("list_messages schema missing folder_ref")
+				t.Fatalf("%s schema missing folder_ref", name)
 			}
 		}
 		if name == "get_message" {
@@ -41,6 +41,16 @@ func TestSharedMailReadSchemaIsStatic(t *testing.T) {
 				if required == "message_id" {
 					t.Fatal("get_message message_id remained unconditionally required")
 				}
+			}
+		}
+		if name == "get_conversation" || name == "list_attachments" || name == "get_attachment" {
+			if _, ok := tool.InputSchema.Properties["message_ref"]; !ok {
+				t.Fatalf("%s schema missing message_ref", name)
+			}
+		}
+		if name == "get_attachment" {
+			if _, ok := tool.InputSchema.Properties["attachment_ref"]; !ok {
+				t.Fatal("get_attachment schema missing attachment_ref")
 			}
 		}
 	}

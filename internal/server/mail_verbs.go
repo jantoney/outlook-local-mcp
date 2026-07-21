@@ -91,13 +91,6 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 	empty := make(tools.VerbRegistry)
 	registryPtr := &empty
 
-	// wrap resolves the account before auth middleware so any reauthentication
-	// attempt uses the selected account's credential, record path, and scopes.
-	wrap := func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
-		h = auth.RequireMailCapability(requiredMailCapability(name), h)
-		return tools.Handler(c.accountResolverMW(c.authMW(observability.WithObservability(name, c.m, c.tracer, audit.AuditWrap(name, auditOp, h)))))
-	}
-
 	// wrapWrite adds ReadOnlyGuard between observability and audit for write verbs.
 	wrapWrite := func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
 		h = auth.RequireMailCapability(requiredMailCapability(name), h)
@@ -117,10 +110,10 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildListFoldersVerb(c, rc, wrapTarget(mailSharedReadGuard())),
 		buildListMessagesVerb(c, rc, wrapTarget(mailSharedFolderReadGuard())),
 		buildGetMessageVerb(c, rc, wrapTarget(mailSharedMessageReadGuard())),
-		buildSearchMessagesVerb(c, rc, wrap),
-		buildGetConversationVerb(c, rc, wrap),
-		buildListAttachmentsVerb(c, rc, wrap),
-		buildGetAttachmentVerb(c, rc, wrap),
+		buildSearchMessagesVerb(c, rc, wrapTarget(mailSharedFolderReadGuard())),
+		buildGetConversationVerb(c, rc, wrapTarget(mailSharedParentMessageGuard("message_ref"))),
+		buildListAttachmentsVerb(c, rc, wrapTarget(mailSharedParentMessageGuard("message_ref"))),
+		buildGetAttachmentVerb(c, rc, wrapTarget(mailSharedParentMessageGuard("message_ref"))),
 		buildCreateDraftVerb(c, rc, wrapWrite),
 		buildCreateReplyDraftVerb(c, rc, wrapWrite),
 		buildCreateForwardDraftVerb(c, rc, wrapWrite),
@@ -338,13 +331,13 @@ func buildSearchMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(
 	return tools.Verb{
 		Name:        "search_messages",
 		Summary:     "full-text KQL search across messages; ranked by relevance, not chronologically",
-		Description: "Searches mail messages using Keyword Query Language (KQL). Results are ranked by relevance, not chronological order. KQL supports field-scoped queries such as 'subject:\"meeting\"', 'from:alice@contoso.com', and 'hasAttachments:true'. Use list_messages with date filters for chronological browsing.",
+		Description: "Searches own or organizational shared-mail messages using KQL. shared_resource selects only the configured owner view; shared folder scoping requires folder_ref and rejects raw folder_id. Shared text and summary results include target-bound message references; raw preserves Graph-derived data beside provenance. Results are ranked by relevance and include bodyPreview; full body requires get_message output=raw.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"query": "subject:\"quarterly review\""}, Comment: "find messages with a specific subject"},
 			{Args: map[string]any{"query": "from:alice@contoso.com hasAttachments:true"}, Comment: "find messages with attachments from a sender"},
 		},
-		SeeDocs: []string{"concepts#output-tiers"},
-		Handler: wrap("mail.search_messages", "read", tools.NewHandleSearchMessages(rc, c.timeout)),
+		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-mail-aliases"},
+		Handler: wrap("mail.search_messages", "read", tools.NewHandleSearchMessages(rc, c.timeout, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -352,13 +345,15 @@ func buildSearchMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability.")),
 			mcp.WithString("query",
 				mcp.Required(),
 				mcp.Description("KQL search string (e.g. subject:\"Design Review\" from:alice@contoso.com)."),
 			),
 			mcp.WithString("folder_id",
-				mcp.Description("Mail folder ID to restrict search to. Omit to search all folders."),
+				mcp.Description("Own-mail folder ID. Rejected with shared_resource; use folder_ref."),
 			),
+			mcp.WithString("folder_ref", mcp.Description("Optional signed shared-mail folder reference from list_folders.")),
 			mcp.WithNumber("max_results",
 				mcp.Description("Maximum number of messages to return (default 25, max 100)."),
 				mcp.Min(1),
@@ -380,9 +375,9 @@ func buildGetConversationVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func
 	return tools.Verb{
 		Name:        "get_conversation",
 		Summary:     "retrieve all messages in an email thread in chronological order",
-		Description: "Retrieves all messages that share a conversation thread in chronological order. Supply either a message_id (the server resolves the conversationId) or a conversation_id directly. Requires the exact read capability.",
-		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrap("mail.get_conversation", "read", tools.NewHandleGetConversation(rc, c.timeout, c.provenancePropertyID)),
+		Description: "Retrieves all messages in a thread chronologically. Own mail accepts message_id or conversation_id. Shared mail requires shared_resource plus a target-bound message_ref, resolves the conversation in the configured owner view, and returns message references in text/summary or a raw provenance sidecar. Content previews are the default; full bodies require output=raw.",
+		SeeDocs:     []string{"concepts#output-tiers", "concepts#shared-mail-aliases"},
+		Handler:     wrap("mail.get_conversation", "read", tools.NewHandleGetConversation(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -390,11 +385,13 @@ func buildGetConversationVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability. Requires message_ref.")),
 			mcp.WithString("message_id",
-				mcp.Description("A message ID in the conversation; conversationId is resolved from it."),
+				mcp.Description("Own-mail message ID. Rejected with shared_resource."),
 			),
+			mcp.WithString("message_ref", mcp.Description("Signed shared-mail message reference used to resolve the conversation.")),
 			mcp.WithString("conversation_id",
-				mcp.Description("Conversation ID to retrieve directly (skips the initial message fetch)."),
+				mcp.Description("Own-mail conversation ID. Shared mail requires message_ref instead."),
 			),
 			mcp.WithNumber("max_results",
 				mcp.Description("Maximum number of messages to return (default 50, max 100)."),
@@ -417,9 +414,9 @@ func buildListAttachmentsVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func
 	return tools.Verb{
 		Name:        "list_attachments",
 		Summary:     "list attachment metadata (id, name, contentType, size) for a message",
-		Description: "Lists the attachments of a mail message, returning metadata: attachment ID, name, content type, and size in bytes. Use get_attachment with the returned attachment_id to download the content. Requires the exact read capability.",
-		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrap("mail.list_attachments", "read", tools.NewHandleListAttachments(rc, c.timeout)),
+		Description: "Lists attachment metadata for one own or shared-mail message. Shared calls require shared_resource plus the target-bound message_ref returned by a message read. Text and summary expose attachment_ref values for download; raw preserves Graph-derived metadata beside provenance.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#shared-mail-aliases"},
+		Handler:     wrap("mail.list_attachments", "read", tools.NewHandleListAttachments(rc, c.timeout, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -427,10 +424,11 @@ func buildListAttachmentsVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability. Requires message_ref.")),
 			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the parent message."),
+				mcp.Description("Own-mail parent message ID. Rejected with shared_resource."),
 			),
+			mcp.WithString("message_ref", mcp.Description("Signed target-bound parent message reference required with shared_resource.")),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),
@@ -447,9 +445,9 @@ func buildGetAttachmentVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(s
 	return tools.Verb{
 		Name:        "get_attachment",
 		Summary:     "download an attachment; returns metadata and base64 content up to the size limit",
-		Description: "Downloads a mail attachment by ID and returns its metadata plus base64-encoded content. Attachments larger than the server's MaxAttachmentSizeBytes limit are rejected with an informative error. Requires the exact read capability.",
-		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrap("mail.get_attachment", "read", tools.NewHandleGetAttachment(rc, c.timeout, c.cfg.MaxAttachmentSizeBytes)),
+		Description: "Downloads an own or shared-mail attachment and returns metadata plus base64 content. Shared calls require shared_resource, the target-bound parent message_ref, and the attachment_ref returned by list_attachments; raw IDs are rejected. Size limits remain enforced before content is returned.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#shared-mail-aliases", "troubleshooting#shared-mail-reference-rejected"},
+		Handler:     wrap("mail.get_attachment", "read", tools.NewHandleGetAttachment(rc, c.timeout, c.cfg.MaxAttachmentSizeBytes, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -457,14 +455,15 @@ func buildGetAttachmentVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(s
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability. Requires message_ref and attachment_ref.")),
 			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the parent message."),
+				mcp.Description("Own-mail parent message ID. Rejected with shared_resource."),
 			),
+			mcp.WithString("message_ref", mcp.Description("Signed target-bound parent message reference required with shared_resource.")),
 			mcp.WithString("attachment_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the attachment."),
+				mcp.Description("Own-mail attachment ID. Rejected with shared_resource."),
 			),
+			mcp.WithString("attachment_ref", mcp.Description("Signed target-bound attachment reference required with shared_resource.")),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),

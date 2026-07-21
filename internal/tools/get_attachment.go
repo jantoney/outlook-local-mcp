@@ -14,6 +14,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -70,12 +71,12 @@ func NewGetAttachmentTool() mcp.Tool {
 //
 // Returns a tool handler function compatible with the MCP server's AddTool
 // method.
-func NewHandleGetAttachment(retryCfg graph.RetryConfig, timeout time.Duration, maxSize int64) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleGetAttachment(retryCfg graph.RetryConfig, timeout time.Duration, maxSize int64, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
@@ -85,17 +86,17 @@ func NewHandleGetAttachment(retryCfg graph.RetryConfig, timeout time.Duration, m
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		messageID, err := request.RequireString("message_id")
-		if err != nil || messageID == "" {
-			return mcp.NewToolResultError("missing required parameter: message_id"), nil
+		messageID, err := target.messageID(request.GetString("message_id", ""))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		attachmentID, err := request.RequireString("attachment_id")
-		if err != nil || attachmentID == "" {
-			return mcp.NewToolResultError("missing required parameter: attachment_id"), nil
+		attachmentID, err := target.attachmentID(request.GetString("attachment_id", ""), request.GetString("attachment_ref", ""), referenceCodec(codecs))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(attachmentID, "attachment_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -109,7 +110,7 @@ func NewHandleGetAttachment(retryCfg graph.RetryConfig, timeout time.Duration, m
 		var att models.Attachmentable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var gErr error
-			att, gErr = client.Me().Messages().ByMessageId(messageID).Attachments().ByAttachmentId(attachmentID).Get(timeoutCtx, nil)
+			att, gErr = target.root.Messages().ByMessageId(messageID).Attachments().ByAttachmentId(attachmentID).Get(timeoutCtx, nil)
 			return gErr
 		})
 		if err != nil {
@@ -118,7 +119,7 @@ func NewHandleGetAttachment(retryCfg graph.RetryConfig, timeout time.Duration, m
 				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 			}
 			logger.Error("graph API call failed", "error", graph.FormatGraphError(err), "duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		// Enforce maximum attachment size from the reported metadata.
@@ -131,16 +132,19 @@ func NewHandleGetAttachment(retryCfg graph.RetryConfig, timeout time.Duration, m
 
 		result := graph.SerializeAttachment(att)
 
+		if outputMode == "summary" {
+			result = graph.SerializeSummaryAttachment(att)
+		}
+		wrapped, err := addSharedAttachmentReference(result, target, referenceCodec(codecs), messageID, outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		if outputMode == "text" {
 			logger.Info("tool completed", "duration", time.Since(start), "attachment_id", attachmentID)
 			return mcp.NewToolResultText(FormatAttachmentText(result)), nil
 		}
 
-		if outputMode == "summary" {
-			result = graph.SerializeSummaryAttachment(att)
-		}
-
-		jsonBytes, jErr := json.Marshal(result)
+		jsonBytes, jErr := json.Marshal(wrapped)
 		if jErr != nil {
 			logger.Error("json serialization failed", "error", jErr.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to serialize attachment: %s", jErr.Error())), nil

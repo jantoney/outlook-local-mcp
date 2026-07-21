@@ -17,6 +17,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	msgraphcore "github.com/microsoftgraph/msgraph-sdk-go-core"
@@ -103,11 +104,15 @@ var conversationFullSelectFields = []string{
 //   - Paginates with a max_results cap.
 //   - Serializes each message per the requested output mode and returns the
 //     thread via SerializeConversationThread.
-func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
+		target, err := mailTargetFromContext(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("no account selected"), nil
+		}
 		client, err := GraphClient(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
@@ -120,7 +125,15 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 
 		messageID := request.GetString("message_id", "")
 		conversationID := request.GetString("conversation_id", "")
-		if messageID == "" && conversationID == "" {
+		if target.isShared() {
+			if conversationID != "" {
+				return mcp.NewToolResultError("shared conversation retrieval requires message_ref and does not accept conversation_id"), nil
+			}
+			messageID, err = target.messageID(messageID)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		} else if messageID == "" && conversationID == "" {
 			return mcp.NewToolResultError("missing required parameter: provide either message_id or conversation_id"), nil
 		}
 		if messageID != "" {
@@ -153,7 +166,7 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 			var msg models.Messageable
 			err := graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var gErr error
-				msg, gErr = client.Me().Messages().ByMessageId(messageID).Get(timeoutCtx, msgCfg)
+				msg, gErr = target.root.Messages().ByMessageId(messageID).Get(timeoutCtx, msgCfg)
 				return gErr
 			})
 			cancel()
@@ -163,7 +176,7 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 					return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 				}
 				logger.Error("graph API call failed (resolve conversation)", "error", graph.FormatGraphError(err), "message_id", messageID, "duration", time.Since(start))
-				return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+				return mcp.NewToolResultError(target.graphError(err)), nil
 			}
 			if cid := msg.GetConversationId(); cid != nil {
 				conversationID = *cid
@@ -200,7 +213,7 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 		var resp models.MessageCollectionResponseable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var gErr error
-			resp, gErr = client.Me().Messages().Get(timeoutCtx, cfg)
+			resp, gErr = target.root.Messages().Get(timeoutCtx, cfg)
 			return gErr
 		})
 		if err != nil {
@@ -209,7 +222,7 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 			}
 			logger.Error("graph API call failed", "error", graph.FormatGraphError(err), "duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		messages := make([]map[string]any, 0, maxResults)
@@ -227,7 +240,7 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 			} else {
 				m = graph.SerializeSummaryMessage(msg)
 			}
-			if provenancePropertyID != "" {
+			if provenancePropertyID != "" && (!target.isShared() || outputMode != "raw") {
 				m["provenance"] = graph.HasMessageProvenanceTag(msg, provenancePropertyID)
 			}
 			messages = append(messages, m)
@@ -244,6 +257,10 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 			b, _ := messages[j]["receivedDateTime"].(string)
 			return a < b
 		})
+		wrapped, err := addSharedMailReferences(messages, target, referenceCodec(codecs), resource.ItemKindMessage, outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		thread := graph.SerializeConversationThread(conversationID, messages)
 
@@ -252,7 +269,12 @@ func NewHandleGetConversation(retryCfg graph.RetryConfig, timeout time.Duration,
 			return mcp.NewToolResultText(FormatConversationText(thread)), nil
 		}
 
-		jsonBytes, err := json.Marshal(thread)
+		output := any(thread)
+		if target.isShared() && outputMode == "raw" {
+			container := wrapped.(map[string]any)
+			output = map[string]any{"data": thread, "provenance": container["provenance"]}
+		}
+		jsonBytes, err := json.Marshal(output)
 		if err != nil {
 			logger.Error("json serialization failed", "error", err.Error())
 			return mcp.NewToolResultError(fmt.Sprintf("failed to serialize thread: %s", err.Error())), nil
