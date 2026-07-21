@@ -39,7 +39,7 @@ func TestCreateDraft_Success(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleCreateDraft(graph.RetryConfig{}, 30*time.Second, "")
+	handler := NewHandleCreateDraft(graph.RetryConfig{}, 30*time.Second, "", nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"subject": "Hello draft",
@@ -69,7 +69,7 @@ func TestCreateDraft_AllFields(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleCreateDraft(graph.RetryConfig{}, 30*time.Second, "")
+	handler := NewHandleCreateDraft(graph.RetryConfig{}, 30*time.Second, "", nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"to_recipients":  "alice@example.com, bob@example.com",
@@ -128,7 +128,7 @@ func TestCreateDraft_WithProvenance(t *testing.T) {
 	ctx := auth.WithGraphClient(context.Background(), client)
 
 	propID := graph.BuildProvenancePropertyID("com.test.outlook-mcp.created")
-	handler := NewHandleCreateDraft(graph.RetryConfig{}, 30*time.Second, propID)
+	handler := NewHandleCreateDraft(graph.RetryConfig{}, 30*time.Second, propID, nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{"subject": "provenance test"}
 	result, err := handler(ctx, req)

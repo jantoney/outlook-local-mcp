@@ -51,12 +51,12 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 		}
 		sharedResource := request.GetString("shared_resource", "")
 		requireReference := config.RequireReference || (config.RequireSharedReference && sharedResource != "")
-		if sharedResource != "" && config.RawIDArgument != "" && request.GetString(config.RawIDArgument, "") != "" {
-			return mcp.NewToolResultError(fmt.Sprintf("shared resource follow-up requires resource_ref and does not accept %s", config.RawIDArgument)), nil
-		}
 		referenceArgument := config.ReferenceArgument
 		if referenceArgument == "" && requireReference {
 			referenceArgument = "resource_ref"
+		}
+		if sharedResource != "" && config.RawIDArgument != "" && request.GetString(config.RawIDArgument, "") != "" {
+			return mcp.NewToolResultError(fmt.Sprintf("shared resource follow-up requires %s and does not accept %s", referenceArgument, config.RawIDArgument)), nil
 		}
 		reference := ""
 		if referenceArgument != "" {

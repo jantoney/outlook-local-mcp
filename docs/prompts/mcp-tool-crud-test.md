@@ -635,6 +635,12 @@ Call `{tool: "mail", args: {operation: "get_conversation", id: "<conversation ID
 - **Verify:** Response is plain text listing one or more messages in chronological order.
 - **Fail:** If the call errors for a valid conversation ID.
 
+### Shared mailbox draft lifecycle (organizational accounts only)
+
+With a genuinely delegated organizational shared mailbox, enable only its `draft` action. Verify a shared `create_draft` returns a target-bound `draft_ref`, then update and delete it using `shared_resource` plus that reference. For reply and forward coverage, first obtain a shared `message_ref` from the same alias and verify each derived draft returns its own `draft_ref`. Confirm all calls remain on `/users/{owner}/messages` routes.
+
+For denial coverage, try each shared draft verb with `draft` disabled, pass a raw `message_id` beside `shared_resource`, pass a draft reference from another alias or mailbox view, and revoke the alias policy between the `isDraft` preflight and update/delete mutation. **Verify:** every denied call stops locally or after the preflight GET with no mutation. If reply/forward creation reports `PARTIAL SUCCESS`, record the returned recovery identifiers and do not repeat the create operation.
+
 ### Step 36 -- Get attachment
 
 Using `{tool: "mail", args: {operation: "list_messages", folder: "Inbox", has_attachments: true, top: 1}}` pick a message that has attachments. If none found, skip Step 36.

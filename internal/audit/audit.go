@@ -240,6 +240,7 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
 		ctx = auth.WithAuditTargetRecorder(ctx)
+		ctx = auth.WithAuditOutcomeRecorder(ctx)
 		result, err := handler(ctx, request)
 		durationMs := time.Since(start).Milliseconds()
 
@@ -257,6 +258,8 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 					errMsg = tc.Text
 				}
 			}
+		} else if recorded, ok := auth.AuditOutcomeFromContext(ctx); ok {
+			outcome = recorded
 		}
 
 		// Extract and sanitize parameters.

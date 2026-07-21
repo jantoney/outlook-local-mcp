@@ -30,7 +30,7 @@ func TestCreateReplyDraft_Reply(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleCreateReplyDraft(graph.RetryConfig{}, 30*time.Second, "")
+	handler := NewHandleCreateReplyDraft(graph.RetryConfig{}, 30*time.Second, "", nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"message_id": "AAMkMessage",
@@ -60,7 +60,7 @@ func TestCreateReplyDraft_ReplyAll(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleCreateReplyDraft(graph.RetryConfig{}, 30*time.Second, "")
+	handler := NewHandleCreateReplyDraft(graph.RetryConfig{}, 30*time.Second, "", nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"message_id": "AAMkMessage",
@@ -94,7 +94,7 @@ func TestCreateReplyDraft_WithProvenance(t *testing.T) {
 	ctx := auth.WithGraphClient(context.Background(), client)
 
 	propID := graph.BuildProvenancePropertyID("com.test.outlook-mcp.created")
-	handler := NewHandleCreateReplyDraft(graph.RetryConfig{}, 30*time.Second, propID)
+	handler := NewHandleCreateReplyDraft(graph.RetryConfig{}, 30*time.Second, propID, nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{"message_id": "AAMkMessage"}
 	result, err := handler(ctx, req)

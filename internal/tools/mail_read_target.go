@@ -71,6 +71,23 @@ func (target mailReadTarget) messageID(requestID string) (string, error) {
 	return target.claims.GraphIDChain[0].ID, nil
 }
 
+// draftID returns an own raw draft ID or the verified shared draft ID.
+func (target mailReadTarget) draftID(requestID string) (string, error) {
+	if !target.isShared() {
+		if requestID == "" {
+			return "", fmt.Errorf("missing required parameter: message_id")
+		}
+		return requestID, nil
+	}
+	if requestID != "" {
+		return "", fmt.Errorf("shared mailbox draft mutation requires draft_ref and does not accept message_id")
+	}
+	if target.claims == nil || target.claims.ItemKind != resource.ItemKindDraft || len(target.claims.GraphIDChain) != 1 {
+		return "", fmt.Errorf("shared mailbox draft mutation requires a verified draft_ref")
+	}
+	return target.claims.GraphIDChain[0].ID, nil
+}
+
 // attachmentID returns an own raw attachment ID or verifies a shared
 // attachment reference whose parent message matches the guarded message claim.
 func (target mailReadTarget) attachmentID(requestID, reference string, codec *resource.ReferenceCodec) (string, error) {

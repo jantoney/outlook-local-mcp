@@ -13,6 +13,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -59,27 +60,30 @@ func NewCreateForwardDraftTool() mcp.Tool {
 // the returned draft.
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retry configuration for the idempotent provenance PATCH only;
+//     the non-idempotent create action is attempted once.
 //   - timeout: the maximum duration for a single Graph API call.
 //   - provenancePropertyID: the full MAPI property ID for provenance tagging.
 //     Empty string disables the follow-up PATCH.
+//   - referenceCodec: signs shared-mail draft references; it may be nil only
+//     for own-mail handlers.
 //
 // Returns a handler function compatible with the MCP server AddTool signature.
 //
-// Side effects: calls POST /me/messages/{id}/createForward, and optionally
-// PATCH /me/messages/{draftID} for provenance.
-func NewHandleCreateForwardDraft(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls createForward on the exact routed source message, then
+// optionally PATCHes that same mailbox's created draft for provenance.
+func NewHandleCreateForwardDraft(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string, referenceCodec *resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
 
-		messageID, err := request.RequireString("message_id")
+		messageID, err := target.messageID(request.GetString("message_id", ""))
 		if err != nil {
-			return mcp.NewToolResultError("missing required parameter: message_id"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -104,22 +108,15 @@ func NewHandleCreateForwardDraft(retryCfg graph.RetryConfig, timeout time.Durati
 
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
+		if err := revalidateMailTarget(ctx, target); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
-		var created models.Messageable
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			var gErr error
-			created, gErr = client.Me().Messages().ByMessageId(messageID).CreateForward().Post(timeoutCtx, body, nil)
-			return gErr
-		})
+		// createForward is non-idempotent and is attempted exactly once.
+		created, err := target.root.Messages().ByMessageId(messageID).CreateForward().Post(timeoutCtx, body, nil)
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
-			}
 			logger.ErrorContext(ctx, "create forward draft failed", "error", graph.FormatGraphError(err))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(draftCreateError(target, err)), nil
 		}
 
 		draftID := graph.SafeStr(created.GetId())
@@ -130,18 +127,28 @@ func NewHandleCreateForwardDraft(retryCfg graph.RetryConfig, timeout time.Durati
 			MaybeSetMailProvenance(patch, provenancePropertyID)
 			patchCtx, patchCancel := graph.WithTimeout(ctx, timeout)
 			pErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
-				_, e := client.Me().Messages().ByMessageId(draftID).Patch(patchCtx, patch, nil)
+				_, e := target.root.Messages().ByMessageId(draftID).Patch(patchCtx, patch, nil)
 				return e
 			})
 			patchCancel()
 			if pErr != nil {
 				logger.WarnContext(ctx, "provenance patch failed", "draft_id", draftID, "error", graph.FormatGraphError(pErr))
+				response := draftCompletionPartial("Forward", draftSubject, draftID, target.graphError(pErr), target, referenceCodec)
+				recordDraftPartialSuccess(ctx)
+				if line := AccountInfoLine(ctx); line != "" {
+					response += "\n" + line
+				}
+				return mcp.NewToolResultText(response), nil
 			}
 		}
 
 		logger.InfoContext(ctx, "forward draft created", "draft_id", draftID)
 
-		response := FormatDraftConfirmation("created", draftSubject, draftID)
+		response, err := draftWriteConfirmation("created", draftSubject, draftID, target, referenceCodec)
+		if err != nil {
+			response = draftCompletionPartial("Forward", draftSubject, draftID, err.Error(), target, referenceCodec)
+			recordDraftPartialSuccess(ctx)
+		}
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line
 		}

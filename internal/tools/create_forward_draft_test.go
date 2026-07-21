@@ -33,7 +33,7 @@ func TestCreateForwardDraft_Success(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleCreateForwardDraft(graph.RetryConfig{}, 30*time.Second, "")
+	handler := NewHandleCreateForwardDraft(graph.RetryConfig{}, 30*time.Second, "", nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"message_id":    "AAMkMessage",

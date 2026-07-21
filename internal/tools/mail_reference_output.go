@@ -59,6 +59,23 @@ func signMailItem(codec *resource.ReferenceCodec, target resource.Target, kind r
 	})
 }
 
+// appendSharedDraftReference adds a renewed target-bound draft reference to a
+// successful shared-mail write confirmation. Own-mail confirmations are
+// returned unchanged.
+func appendSharedDraftReference(response string, target mailReadTarget, codec *resource.ReferenceCodec, draftID string) (string, error) {
+	if !target.isShared() {
+		return response, nil
+	}
+	if codec == nil {
+		return "", fmt.Errorf("shared resource reference signing is unavailable")
+	}
+	reference, err := signMailItem(codec, target.target, resource.ItemKindDraft, draftID)
+	if err != nil {
+		return "", err
+	}
+	return response + "\nDraft Ref: " + reference, nil
+}
+
 // addSharedAttachmentReferences signs attachment metadata with its verified
 // parent message chain and preserves raw maps through a sidecar.
 func addSharedAttachmentReferences(items []map[string]any, target mailReadTarget, codec *resource.ReferenceCodec, messageID string, raw bool) (any, error) {

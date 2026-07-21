@@ -15,6 +15,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
@@ -79,30 +80,31 @@ func NewUpdateDraftTool() mcp.Tool {
 // Parameters:
 //   - retryCfg: retry configuration for transient Graph API errors.
 //   - timeout: the maximum duration for a single Graph API call.
+//   - referenceCodec: signs renewed shared-mail draft references; it may be nil
+//     only for own-mail handlers.
 //
 // Returns a handler function compatible with the MCP server AddTool signature.
 //
-// Side effects: calls GET /me/messages/{id} then PATCH /me/messages/{id} on
-// the Microsoft Graph API.
-func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls GET then PATCH on the exact routed mailbox message.
+func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration, referenceCodec *resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
 
-		messageID, err := request.RequireString("message_id")
+		messageID, err := target.draftID(request.GetString("message_id", ""))
 		if err != nil {
-			return mcp.NewToolResultError("missing required parameter: message_id"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		// Step 1: verify isDraft=true.
-		if errResult := verifyIsDraft(ctx, client, retryCfg, timeout, messageID, logger); errResult != nil {
+		if errResult := verifyRoutedIsDraft(ctx, target, retryCfg, timeout, messageID, logger); errResult != nil {
 			return errResult, nil
 		}
 
@@ -166,6 +168,9 @@ func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 		if !anyField {
 			return mcp.NewToolResultError("no updatable fields provided"), nil
 		}
+		if err := revalidateMailTarget(ctx, target); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -173,7 +178,7 @@ func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 		var updated models.Messageable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var gErr error
-			updated, gErr = client.Me().Messages().ByMessageId(messageID).Patch(timeoutCtx, patch, nil)
+			updated, gErr = target.root.Messages().ByMessageId(messageID).Patch(timeoutCtx, patch, nil)
 			return gErr
 		})
 		if err != nil {
@@ -184,14 +189,17 @@ func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 			}
 			logger.ErrorContext(ctx, "update draft failed", "error", graph.FormatGraphError(err))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		draftID := graph.SafeStr(updated.GetId())
 		draftSubject := graph.SafeStr(updated.GetSubject())
 		logger.InfoContext(ctx, "draft updated", "draft_id", draftID)
 
-		response := FormatDraftConfirmation("updated", draftSubject, draftID)
+		response, err := draftWriteConfirmation("updated", draftSubject, draftID, target, referenceCodec)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line
 		}
@@ -199,13 +207,13 @@ func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 	}
 }
 
-// verifyIsDraft fetches the target message with a narrow $select and returns
+// verifyRoutedIsDraft fetches the target message with a narrow $select and returns
 // an MCP error result if the message is not found, not a draft, or the GET
 // call fails. Returns nil when the message is confirmed to be a draft.
 //
 // Parameters:
 //   - ctx: the request context.
-//   - client: the Graph service client.
+//   - target: the immutable mailbox route and Graph root.
 //   - retryCfg: retry configuration.
 //   - timeout: request timeout for the verification call.
 //   - messageID: the message identifier to verify.
@@ -215,7 +223,7 @@ func NewHandleUpdateDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 // message is a draft.
 //
 // Side effects: calls GET /me/messages/{id} on the Microsoft Graph API.
-func verifyIsDraft(ctx context.Context, client *msgraphsdk.GraphServiceClient, retryCfg graph.RetryConfig, timeout time.Duration, messageID string, logger *slog.Logger) *mcp.CallToolResult {
+func verifyRoutedIsDraft(ctx context.Context, target mailReadTarget, retryCfg graph.RetryConfig, timeout time.Duration, messageID string, logger *slog.Logger) *mcp.CallToolResult {
 	timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -227,7 +235,7 @@ func verifyIsDraft(ctx context.Context, client *msgraphsdk.GraphServiceClient, r
 	var msg models.Messageable
 	err := graph.RetryGraphCall(ctx, retryCfg, func() error {
 		var gErr error
-		msg, gErr = client.Me().Messages().ByMessageId(messageID).Get(timeoutCtx, cfg)
+		msg, gErr = target.root.Messages().ByMessageId(messageID).Get(timeoutCtx, cfg)
 		return gErr
 	})
 	if err != nil {
@@ -236,10 +244,16 @@ func verifyIsDraft(ctx context.Context, client *msgraphsdk.GraphServiceClient, r
 			return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds())))
 		}
 		logger.ErrorContext(ctx, "isDraft verification failed", "error", graph.FormatGraphError(err))
-		return mcp.NewToolResultError(graph.RedactGraphError(err))
+		return mcp.NewToolResultError(target.graphError(err))
 	}
 	if !graph.SafeBool(msg.GetIsDraft()) {
 		return mcp.NewToolResultError("message is not a draft: this tool only operates on messages with isDraft=true")
 	}
 	return nil
+}
+
+// verifyIsDraft preserves the own-mail preflight used by draft-adjacent verbs
+// that have not yet adopted shared target routing.
+func verifyIsDraft(ctx context.Context, client *msgraphsdk.GraphServiceClient, retryCfg graph.RetryConfig, timeout time.Duration, messageID string, logger *slog.Logger) *mcp.CallToolResult {
+	return verifyRoutedIsDraft(ctx, mailReadTarget{root: client.Me()}, retryCfg, timeout, messageID, logger)
 }

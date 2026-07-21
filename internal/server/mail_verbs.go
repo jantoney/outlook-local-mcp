@@ -102,6 +102,12 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 			return tools.Handler(c.accountResolverMW(c.authMW(observability.WithObservability(name, c.m, c.tracer, audit.AuditWrap(name, auditOp, h)))))
 		}
 	}
+	wrapTargetWrite := func(guard TargetGuardConfig) func(string, string, mcpserver.ToolHandlerFunc) tools.Handler {
+		return func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
+			h = ResolvedTargetGuard(c.registry, guard, c.referenceCodec, h)
+			return tools.Handler(c.accountResolverMW(c.authMW(observability.WithObservability(name, c.m, c.tracer, ReadOnlyGuard(name, c.readOnly, audit.AuditWrap(name, auditOp, h))))))
+		}
+	}
 
 	rc := c.retryCfg
 
@@ -114,11 +120,11 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildGetConversationVerb(c, rc, wrapTarget(mailSharedParentMessageGuard("message_ref"))),
 		buildListAttachmentsVerb(c, rc, wrapTarget(mailSharedParentMessageGuard("message_ref"))),
 		buildGetAttachmentVerb(c, rc, wrapTarget(mailSharedParentMessageGuard("message_ref"))),
-		buildCreateDraftVerb(c, rc, wrapWrite),
-		buildCreateReplyDraftVerb(c, rc, wrapWrite),
-		buildCreateForwardDraftVerb(c, rc, wrapWrite),
-		buildUpdateDraftVerb(c, rc, wrapWrite),
-		buildDeleteDraftVerb(c, rc, wrapWrite),
+		buildCreateDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftCreateGuard())),
+		buildCreateReplyDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftSourceGuard())),
+		buildCreateForwardDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftSourceGuard())),
+		buildUpdateDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
+		buildDeleteDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildAddAttachmentVerb(c, rc, wrapWrite),
 		buildSendDraftVerb(c, rc, wrapWrite),
 	}
@@ -480,12 +486,12 @@ func buildCreateDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite fun
 	return tools.Verb{
 		Name:        "create_draft",
 		Summary:     "create a new email draft in the Drafts folder (not sent automatically)",
-		Description: "Creates a new email draft and saves it to the Drafts folder without sending. Supports To, Cc, Bcc recipients, subject, plain-text or HTML body, and importance. Requires the exact draft capability; draft never implies send.",
+		Description: "Creates a new own or organizational shared-mail draft through the exact selected mailbox. Shared drafts return a target-bound draft_ref. Supports recipients, subject, body, and importance. Requires the exact draft capability; draft never implies send.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"to_recipients": "alice@contoso.com", "subject": "Follow-up", "body": "Hi Alice..."}, Comment: "create a simple plain-text draft"},
 		},
 		SeeDocs: []string{"concepts#independent-mail-action-policies"},
-		Handler: wrapWrite("mail.create_draft", "write", tools.NewHandleCreateDraft(rc, c.timeout, c.provenancePropertyID)),
+		Handler: wrapWrite("mail.create_draft", "write", tools.NewHandleCreateDraft(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -518,6 +524,7 @@ func buildCreateDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite fun
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 		},
 	}
 }
@@ -527,9 +534,9 @@ func buildCreateReplyDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrit
 	return tools.Verb{
 		Name:        "create_reply_draft",
 		Summary:     "create a reply draft to an existing message preserving threading headers",
-		Description: "Creates a reply draft for an existing message, preserving all email threading headers (References, In-Reply-To). The original message is quoted automatically. Use reply_all=true to reply to all original recipients. Requires the exact draft capability.",
+		Description: "Creates an own or organizational shared-mail reply draft through the source message's exact mailbox. Shared calls require message_ref and return draft_ref. Preserves threading headers and requires the exact draft capability.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrapWrite("mail.create_reply_draft", "write", tools.NewHandleCreateReplyDraft(rc, c.timeout, c.provenancePropertyID)),
+		Handler:     wrapWrite("mail.create_reply_draft", "write", tools.NewHandleCreateReplyDraft(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -537,10 +544,9 @@ func buildCreateReplyDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrit
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
-			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the source message to reply to."),
-			),
+			mcp.WithString("message_id", mcp.Description("Own-mail source message ID. Rejected with shared_resource.")),
+			mcp.WithString("message_ref", mcp.Description("Target-bound shared source-message reference.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("comment",
 				mcp.Description("Optional reply body text prepended to the quoted original."),
 			),
@@ -559,9 +565,9 @@ func buildCreateForwardDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWr
 	return tools.Verb{
 		Name:        "create_forward_draft",
 		Summary:     "create a forward draft of an existing message with new recipients",
-		Description: "Creates a forward draft for an existing message with the original message quoted. Supply the new To recipients and an optional forward comment. Requires the exact draft capability.",
+		Description: "Creates an own or organizational shared-mail forward draft through the source message's exact mailbox. Shared calls require message_ref and return draft_ref. Requires the exact draft capability.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrapWrite("mail.create_forward_draft", "write", tools.NewHandleCreateForwardDraft(rc, c.timeout, c.provenancePropertyID)),
+		Handler:     wrapWrite("mail.create_forward_draft", "write", tools.NewHandleCreateForwardDraft(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -569,10 +575,9 @@ func buildCreateForwardDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWr
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
-			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the source message to forward."),
-			),
+			mcp.WithString("message_id", mcp.Description("Own-mail source message ID. Rejected with shared_resource.")),
+			mcp.WithString("message_ref", mcp.Description("Target-bound shared source-message reference.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("to_recipients",
 				mcp.Description("Comma-separated list of To recipient email addresses."),
 			),
@@ -591,9 +596,9 @@ func buildUpdateDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite fun
 	return tools.Verb{
 		Name:        "update_draft",
 		Summary:     "update draft fields (PATCH semantics; non-draft messages rejected)",
-		Description: "Updates fields of an existing draft using PATCH semantics: only supplied fields are changed. Attempting to update a non-draft message returns an error. Supports recipients, subject, body, content type, and importance. Requires the exact draft capability.",
+		Description: "Updates an own or organizational shared-mail draft through its exact mailbox after verifying isDraft=true. Shared calls require draft_ref and return a renewed draft_ref. Requires the exact draft capability.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
-		Handler:     wrapWrite("mail.update_draft", "write", tools.NewHandleUpdateDraft(rc, c.timeout)),
+		Handler:     wrapWrite("mail.update_draft", "write", tools.NewHandleUpdateDraft(rc, c.timeout, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -601,10 +606,9 @@ func buildUpdateDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite fun
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
-			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the draft message to update."),
-			),
+			mcp.WithString("message_id", mcp.Description("Own-mail draft message ID. Rejected with shared_resource.")),
+			mcp.WithString("draft_ref", mcp.Description("Target-bound shared draft reference.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("to_recipients",
 				mcp.Description("Comma-separated list of To recipient email addresses (replaces existing)."),
 			),
@@ -639,7 +643,7 @@ func buildDeleteDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite fun
 	return tools.Verb{
 		Name:        "delete_draft",
 		Summary:     "permanently delete a draft message (irreversible; non-draft messages rejected)",
-		Description: "Permanently deletes a draft message. This operation is irreversible. Attempting to delete a non-draft message returns an error as a safety guard. Requires the exact draft capability.",
+		Description: "Permanently deletes an own or organizational shared-mail draft through its exact mailbox after verifying isDraft=true. Shared calls require draft_ref. Requires the exact draft capability.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies"},
 		Handler:     wrapWrite("mail.delete_draft", "delete", tools.NewHandleDeleteDraft(rc, c.timeout)),
 		Annotations: []mcp.ToolOption{
@@ -649,10 +653,9 @@ func buildDeleteDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite fun
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
-			mcp.WithString("message_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the draft message to delete."),
-			),
+			mcp.WithString("message_id", mcp.Description("Own-mail draft message ID. Rejected with shared_resource.")),
+			mcp.WithString("draft_ref", mcp.Description("Target-bound shared draft reference.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),

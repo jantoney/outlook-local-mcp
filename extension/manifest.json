@@ -62,7 +62,7 @@
     },
     {
       "name": "mail",
-      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected target's exact action policy authorizes each operation. Organizational shared-mail folder, message, search, conversation, and attachment reads use configured owner-view routes and signed target-bound references; raw output keeps Graph-derived data beside a provenance sidecar. Includes own reads, drafts, add_attachment (allowlisted local file), and send_draft (human-reviewed existing draft send)."
+      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected target's exact action policy authorizes each operation. Organizational shared-mail reads and draft lifecycle operations use configured owner-view routes and signed target-bound message, attachment, and draft references; raw read output keeps Graph-derived data beside a provenance sidecar. Includes own reads and drafts, add_attachment (allowlisted local file), and send_draft (human-reviewed existing draft send)."
     },
     {
       "name": "account",

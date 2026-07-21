@@ -366,6 +366,28 @@ func TestAuditWrap_Success(t *testing.T) {
 	}
 }
 
+// TestAuditWrapPartialSuccess verifies a committed operation with incomplete
+// follow-up work is not misclassified as ordinary success or protocol error.
+func TestAuditWrapPartialSuccess(t *testing.T) {
+	var buf bytes.Buffer
+	setAuditState(t, true, &buf)
+	handler := func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		auth.RecordAuditOutcome(ctx, "partial_success")
+		return mcp.NewToolResultText("PARTIAL SUCCESS: draft created"), nil
+	}
+	result, err := AuditWrap("mail.create_reply_draft", "write", handler)(context.Background(), mcp.CallToolRequest{})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("result = %+v, error = %v", result, err)
+	}
+	var entry AuditEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("invalid audit JSON: %v", err)
+	}
+	if entry.Outcome != "partial_success" {
+		t.Fatalf("Outcome = %q, want partial_success", entry.Outcome)
+	}
+}
+
 // TestAuditWrapCapturesAccountPolicyCapabilityAndResource verifies the audit
 // contract records exact authorization evidence for a mail operation.
 func TestAuditWrapCapturesAccountPolicyCapabilityAndResource(t *testing.T) {

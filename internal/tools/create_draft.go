@@ -13,6 +13,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -72,23 +73,26 @@ func NewCreateDraftTool() mcp.Tool {
 // folder without sending it.
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retained for constructor consistency; the non-idempotent create
+//     POST is deliberately attempted once and is never retried.
 //   - timeout: the maximum duration for the Graph API call.
 //   - provenancePropertyID: the full MAPI property ID for provenance tagging
 //     (built via graph.BuildProvenancePropertyID). Empty string disables
 //     provenance.
+//   - referenceCodec: signs shared-mail draft references; it may be nil only
+//     for own-mail handlers.
 //
 // Returns a handler function compatible with the MCP server AddTool signature.
 //
-// Side effects: calls POST /me/messages on the Microsoft Graph API. Logs at
-// debug level on entry, error level on failure, and info level on success.
-func NewHandleCreateDraft(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls POST on the exact routed mailbox messages collection.
+// Logs at debug level on entry, error level on failure, and info level on success.
+func NewHandleCreateDraft(_ graph.RetryConfig, timeout time.Duration, provenancePropertyID string, referenceCodec *resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		args := request.GetArguments()
 		logger.DebugContext(ctx, "tool called")
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
@@ -148,32 +152,30 @@ func NewHandleCreateDraft(retryCfg graph.RetryConfig, timeout time.Duration, pro
 
 		// Provenance tagging (opt-in via ProvenanceTag config).
 		MaybeSetMailProvenance(msg, provenancePropertyID)
+		if err := revalidateMailTarget(ctx, target); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
 
-		var created models.Messageable
-		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			var gErr error
-			created, gErr = client.Me().Messages().Post(timeoutCtx, msg, nil)
-			return gErr
-		})
+		// Draft creation is non-idempotent. A transient or ambiguous response is
+		// surfaced for recovery and never retried automatically.
+		created, err := target.root.Messages().Post(timeoutCtx, msg, nil)
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
-			}
 			logger.ErrorContext(ctx, "create draft failed", "error", graph.FormatGraphError(err))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(draftCreateError(target, err)), nil
 		}
 
 		draftID := graph.SafeStr(created.GetId())
 		draftSubject := graph.SafeStr(created.GetSubject())
 		logger.InfoContext(ctx, "draft created", "draft_id", draftID)
 
-		response := FormatDraftConfirmation("created", draftSubject, draftID)
+		response, err := draftWriteConfirmation("created", draftSubject, draftID, target, referenceCodec)
+		if err != nil {
+			response = draftCompletionPartial("New", draftSubject, draftID, err.Error(), target, referenceCodec)
+			recordDraftPartialSuccess(ctx)
+		}
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line
 		}

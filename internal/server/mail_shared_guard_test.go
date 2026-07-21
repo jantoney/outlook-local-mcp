@@ -110,6 +110,66 @@ func TestSharedMailReadGuardRecordsOwnerAuditTarget(t *testing.T) {
 	}
 }
 
+// TestSharedDraftGuardsFailBeforeHandler verifies exact draft capability and
+// target-bound message or draft provenance are required before any Graph work.
+func TestSharedDraftGuardsFailBeforeHandler(t *testing.T) {
+	var handlerCalls atomic.Int32
+	client, server := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	inner := mcpserver.ToolHandlerFunc(func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handlerCalls.Add(1)
+		return mcp.NewToolResultText("unexpected"), nil
+	})
+	registry, entry, codec := sharedMailGuardFixture(t, client, auth.TokenTenantOrganizational)
+
+	tests := []struct {
+		name  string
+		guard TargetGuardConfig
+		args  map[string]any
+	}{
+		{"draft disabled", mailSharedDraftCreateGuard(), map[string]any{"shared_resource": "finance-mail"}},
+		{"reply raw id", mailSharedDraftSourceGuard(), map[string]any{"shared_resource": "finance-mail", "message_id": "message-1"}},
+		{"update raw id", mailSharedDraftItemGuard(), map[string]any{"shared_resource": "finance-mail", "message_id": "draft-1"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ResolvedTargetGuard(registry, test.guard, &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(test.args))
+			if err != nil || !result.IsError {
+				t.Fatalf("result = %+v, error = %v", result, err)
+			}
+		})
+	}
+
+	entry.MailAliases[0].Policy.Draft = true
+	other, err := resource.NewMailAlias(resource.ResourceID("44444444-4444-4444-8444-444444444444"), "other-mail", "other@example.com")
+	if err != nil {
+		t.Fatalf("NewMailAlias() error = %v", err)
+	}
+	other.Policy.Draft = true
+	entry.MailAliases = append(entry.MailAliases, other)
+	otherTarget, err := resource.TargetFromMailAlias(entry.AccountID, other)
+	if err != nil {
+		t.Fatalf("TargetFromMailAlias() error = %v", err)
+	}
+	reference, err := codec.Sign(resource.ReferenceClaims{
+		AccountID: otherTarget.AccountID, ResourceID: otherTarget.ResourceID, ResourceKind: otherTarget.Kind,
+		MailboxView: otherTarget.View, ItemKind: resource.ItemKindDraft,
+		GraphIDChain: []resource.GraphID{{Kind: resource.ItemKindDraft, ID: "draft-1"}},
+	})
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	result, err := ResolvedTargetGuard(registry, mailSharedDraftItemGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(map[string]any{
+		"shared_resource": "finance-mail", "draft_ref": reference,
+	}))
+	if err != nil || !result.IsError {
+		t.Fatalf("cross-target result = %+v, error = %v", result, err)
+	}
+	if handlerCalls.Load() != 0 {
+		t.Fatalf("handler calls = %d, want zero", handlerCalls.Load())
+	}
+}
+
 // sharedMailGuardFixture creates one organizational mailbox alias and signer.
 func sharedMailGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient, tenant auth.TokenTenantContext) (*auth.AccountRegistry, *auth.AccountEntry, resource.ReferenceCodec) {
 	t.Helper()

@@ -39,7 +39,7 @@ func TestUpdateDraft_Success(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleUpdateDraft(graph.RetryConfig{}, 30*time.Second)
+	handler := NewHandleUpdateDraft(graph.RetryConfig{}, 30*time.Second, nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"message_id": "draft-1",
@@ -65,7 +65,7 @@ func TestUpdateDraft_NotDraft(t *testing.T) {
 	defer srv.Close()
 	ctx := auth.WithGraphClient(context.Background(), client)
 
-	handler := NewHandleUpdateDraft(graph.RetryConfig{}, 30*time.Second)
+	handler := NewHandleUpdateDraft(graph.RetryConfig{}, 30*time.Second, nil)
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"message_id": "msg-1",

@@ -329,9 +329,15 @@ Shared-mail configuration and use require authoritative token evidence for an or
 
 ## Shared mail reference is rejected {#shared-mail-reference-rejected}
 
-A shared folder, message, or attachment reference is valid only for the account, immutable mailbox resource, owner view, item kind, and Graph ID chain from which it was issued. Attachment references additionally bind their parent message. Raw folder, message, or attachment IDs plus `shared_resource`, mismatched parent references, cross-mailbox references, disabled read policy, removed aliases, and recreated aliases fail locally before Graph.
+A shared folder, message, draft, or attachment reference is valid only for the account, immutable mailbox resource, owner view, item kind, and Graph ID chain from which it was issued. Attachment references additionally bind their parent message. Raw folder, message, draft, or attachment IDs plus `shared_resource`, mismatched parent references, cross-mailbox references, disabled action policy, removed aliases, and recreated aliases fail locally before Graph.
 
-**Remedy:** Confirm the organizational account and alias with `account.list_mail_aliases`, ensure only the intended alias has `read` enabled, and obtain fresh references from `mail.list_folders`, `mail.list_messages`, `mail.search_messages`, or `mail.list_attachments` on that exact alias. Keep a downloaded attachment paired with the message reference used to list it. If the exact owner route is denied, verify Exchange mailbox or folder delegation separately; broader OAuth consent does not create mailbox access.
+**Remedy:** Confirm the organizational account and alias with `account.list_mail_aliases`, ensure only the intended action is enabled, and obtain fresh references from a successful operation on that exact alias. Draft writes require `draft`; reads require `read`. Keep an attachment paired with the message reference used to list it. If the exact owner route is denied, verify Exchange mailbox or folder delegation separately; broader OAuth consent does not create mailbox access.
+
+## Shared draft creation reports partial success {#shared-draft-partial-success}
+
+A reply or forward draft can be created successfully before its required provenance PATCH fails or becomes uncertain. The tool reports `PARTIAL SUCCESS`, the draft ID, a `draft_ref` when signing succeeds, and the immutable shared target. This means a draft exists even though MCP completion was not fully confirmed.
+
+**Remedy:** Do not repeat the create operation because that can create a duplicate. If the alias still permits `draft`, inspect or update the existing draft with its `draft_ref`; otherwise open the configured shared mailbox's Drafts folder in Outlook and locate the reported draft ID or subject. A later policy change does not make the reference an authorization token: every use is checked again.
 
 ---
 

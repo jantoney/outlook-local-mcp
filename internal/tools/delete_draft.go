@@ -54,34 +54,36 @@ func NewDeleteDraftTool() mcp.Tool {
 //
 // Returns a handler function compatible with the MCP server AddTool signature.
 //
-// Side effects: calls GET then DELETE /me/messages/{id} on the Microsoft
-// Graph API.
+// Side effects: calls GET then DELETE on the exact routed mailbox message.
 func NewHandleDeleteDraft(retryCfg graph.RetryConfig, timeout time.Duration) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
 
-		messageID, err := request.RequireString("message_id")
+		messageID, err := target.draftID(request.GetString("message_id", ""))
 		if err != nil {
-			return mcp.NewToolResultError("missing required parameter: message_id"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		if errResult := verifyIsDraft(ctx, client, retryCfg, timeout, messageID, logger); errResult != nil {
+		if errResult := verifyRoutedIsDraft(ctx, target, retryCfg, timeout, messageID, logger); errResult != nil {
 			return errResult, nil
+		}
+		if err := revalidateMailTarget(ctx, target); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-			return client.Me().Messages().ByMessageId(messageID).Delete(timeoutCtx, nil)
+			return target.root.Messages().ByMessageId(messageID).Delete(timeoutCtx, nil)
 		})
 		if err != nil {
 			if graph.IsTimeoutError(err) {
@@ -91,7 +93,7 @@ func NewHandleDeleteDraft(retryCfg graph.RetryConfig, timeout time.Duration) fun
 				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
 			}
 			logger.ErrorContext(ctx, "delete draft failed", "error", graph.FormatGraphError(err))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		logger.InfoContext(ctx, "draft deleted", "draft_id", messageID)

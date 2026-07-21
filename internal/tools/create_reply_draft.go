@@ -15,6 +15,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -74,27 +75,30 @@ func NewCreateReplyDraftTool() mcp.Tool {
 // body directly).
 //
 // Parameters:
-//   - retryCfg: retry configuration for transient Graph API errors.
+//   - retryCfg: retry configuration for the idempotent provenance PATCH only;
+//     the non-idempotent create action is attempted once.
 //   - timeout: the maximum duration for a single Graph API call.
 //   - provenancePropertyID: the full MAPI property ID for provenance tagging.
 //     Empty string disables the follow-up PATCH.
+//   - referenceCodec: signs shared-mail draft references; it may be nil only
+//     for own-mail handlers.
 //
 // Returns a handler function compatible with the MCP server AddTool signature.
 //
-// Side effects: calls POST /me/messages/{id}/createReply or /createReplyAll,
-// and optionally PATCH /me/messages/{draftID} for provenance.
-func NewHandleCreateReplyDraft(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Side effects: calls createReply or createReplyAll on the exact routed source
+// message, then optionally PATCHes that same mailbox's created draft.
+func NewHandleCreateReplyDraft(retryCfg graph.RetryConfig, timeout time.Duration, provenancePropertyID string, referenceCodec *resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
 
-		messageID, err := request.RequireString("message_id")
+		messageID, err := target.messageID(request.GetString("message_id", ""))
 		if err != nil {
-			return mcp.NewToolResultError("missing required parameter: message_id"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -106,6 +110,9 @@ func NewHandleCreateReplyDraft(retryCfg graph.RetryConfig, timeout time.Duration
 
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
+		if err := revalidateMailTarget(ctx, target); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		var created models.Messageable
 		if replyAll {
@@ -114,35 +121,21 @@ func NewHandleCreateReplyDraft(retryCfg graph.RetryConfig, timeout time.Duration
 				c := comment
 				body.SetComment(&c)
 			}
-			err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-				var gErr error
-				created, gErr = client.Me().Messages().ByMessageId(messageID).CreateReplyAll().Post(timeoutCtx, body, nil)
-				return gErr
-			})
+			created, err = target.root.Messages().ByMessageId(messageID).CreateReplyAll().Post(timeoutCtx, body, nil)
 		} else {
 			body := users.NewItemMessagesItemCreateReplyPostRequestBody()
 			if comment != "" {
 				c := comment
 				body.SetComment(&c)
 			}
-			err = graph.RetryGraphCall(ctx, retryCfg, func() error {
-				var gErr error
-				created, gErr = client.Me().Messages().ByMessageId(messageID).CreateReply().Post(timeoutCtx, body, nil)
-				return gErr
-			})
+			created, err = target.root.Messages().ByMessageId(messageID).CreateReply().Post(timeoutCtx, body, nil)
 		}
 		if err != nil {
-			if graph.IsTimeoutError(err) {
-				logger.ErrorContext(ctx, "request timed out",
-					"timeout_seconds", int(timeout.Seconds()),
-					"error", err.Error())
-				return mcp.NewToolResultError(graph.TimeoutErrorMessage(int(timeout.Seconds()))), nil
-			}
 			logger.ErrorContext(ctx, "create reply draft failed", "error", graph.FormatGraphError(err))
 			if strings.Contains(graph.FormatGraphError(err), "ErrorInvalidReferenceItem") {
 				return mcp.NewToolResultError(invalidReferenceReplyMessage), nil
 			}
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(draftCreateError(target, err)), nil
 		}
 
 		draftID := graph.SafeStr(created.GetId())
@@ -155,18 +148,28 @@ func NewHandleCreateReplyDraft(retryCfg graph.RetryConfig, timeout time.Duration
 			MaybeSetMailProvenance(patch, provenancePropertyID)
 			patchCtx, patchCancel := graph.WithTimeout(ctx, timeout)
 			pErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
-				_, e := client.Me().Messages().ByMessageId(draftID).Patch(patchCtx, patch, nil)
+				_, e := target.root.Messages().ByMessageId(draftID).Patch(patchCtx, patch, nil)
 				return e
 			})
 			patchCancel()
 			if pErr != nil {
 				logger.WarnContext(ctx, "provenance patch failed", "draft_id", draftID, "error", graph.FormatGraphError(pErr))
+				response := draftCompletionPartial("Reply", draftSubject, draftID, target.graphError(pErr), target, referenceCodec)
+				recordDraftPartialSuccess(ctx)
+				if line := AccountInfoLine(ctx); line != "" {
+					response += "\n" + line
+				}
+				return mcp.NewToolResultText(response), nil
 			}
 		}
 
 		logger.InfoContext(ctx, "reply draft created", "draft_id", draftID, "reply_all", replyAll)
 
-		response := FormatDraftConfirmation("created", draftSubject, draftID)
+		response, err := draftWriteConfirmation("created", draftSubject, draftID, target, referenceCodec)
+		if err != nil {
+			response = draftCompletionPartial("Reply", draftSubject, draftID, err.Error(), target, referenceCodec)
+			recordDraftPartialSuccess(ctx)
+		}
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line
 		}
