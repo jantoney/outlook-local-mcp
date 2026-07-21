@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,15 @@ var ErrInvalidReference = errors.New("invalid resource reference")
 // one local signing authority.
 type ReferenceCodec struct {
 	key SigningKey
+}
+
+// KeyedFingerprint returns a domain-separated HMAC fingerprint suitable for
+// audit correlation without storing sensitive review evidence. The result is
+// truncated to 128 bits and cannot be used to authorize a resource.
+func (c ReferenceCodec) KeyedFingerprint(label, value string) string {
+	mac := hmac.New(sha256.New, c.key.bytes[:])
+	_, _ = mac.Write([]byte("audit:" + label + "\x00" + value))
+	return hex.EncodeToString(mac.Sum(nil)[:16])
 }
 
 // NewReferenceCodec creates a codec bound to key. The returned codec performs

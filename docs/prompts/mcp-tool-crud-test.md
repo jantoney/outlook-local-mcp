@@ -678,6 +678,8 @@ If no safe test file path under `OUTLOOK_MCP_ATTACHMENT_ROOTS` was supplied by t
 
 Run only in interactive mode with a selected account whose `send` capability is true. Create a dedicated self-addressed draft, call `{tool: "mail", args: {operation: "send_draft", message_id: "<draft ID>"}}`, and verify MCP elicitation displays its subject, recipient, and attachment names before accepting. Verify the confirmation says Microsoft Graph accepted the send and that delivery remains subject to Exchange processing. In non-interactive mode or with `send` disabled, record SKIP; a boolean confirmation argument must never be supplied.
 
+For an organizational shared mailbox with tested Exchange Send As or Send on Behalf rights, create a dedicated shared draft and call `send_draft` with `shared_resource` plus its `draft_ref`. Verify the review shows masked delegate/owner, canonical From, separate To/Cc/Bcc, subject, the complete attachment set, body-review-in-Outlook warning, sender-right ambiguity, and owner Sent Items default. Accept only the unchanged disposable draft. **Verify:** authority and all evidence are refetched, exactly one owner-route send POST occurs, and the result says accepted for Exchange processing rather than delivered. Decline, remove an attachment, change a recipient, use a raw ID, disable send, and simulate incomplete pagination or unsupported elicitation; every case must dispatch no send. A timeout, connection loss, or 5xx after dispatch must be uncertain and never retried.
+
 - **Verify:** Accepting an unchanged draft sends once; declining or changing the draft sends nothing.
 - **Fail:** If sending occurs without accepted elicitation or if the confirmation claims final delivery.
 

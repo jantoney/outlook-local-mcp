@@ -97,6 +97,10 @@ type AuditEntry struct {
 	// ConfirmationState is the final human-confirmation state for an operation
 	// that requires MCP elicitation.
 	ConfirmationState string `json:"confirmation_state,omitempty"`
+
+	// SendEvidence contains sanitized counts and keyed fingerprints for a
+	// reviewed shared send and omits raw addresses or message metadata.
+	SendEvidence *auth.AuditSendEvidence `json:"send_evidence,omitempty"`
 }
 
 // MaskAuditEmail masks an email address by keeping only the first character of
@@ -246,6 +250,7 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 		ctx = auth.WithAuditTargetRecorder(ctx)
 		ctx = auth.WithAuditOutcomeRecorder(ctx)
 		ctx = auth.WithAuditConfirmationRecorder(ctx)
+		ctx = auth.WithAuditSendEvidenceRecorder(ctx)
 		result, err := handler(ctx, request)
 		durationMs := time.Since(start).Milliseconds()
 
@@ -263,7 +268,8 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 					errMsg = tc.Text
 				}
 			}
-		} else if recorded, ok := auth.AuditOutcomeFromContext(ctx); ok {
+		}
+		if recorded, ok := auth.AuditOutcomeFromContext(ctx); ok {
 			outcome = recorded
 		}
 
@@ -292,6 +298,10 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 		targetView := ""
 		targetCompatibility := ""
 		confirmationState, _ := auth.AuditConfirmationFromContext(ctx)
+		var sendEvidence *auth.AuditSendEvidence
+		if evidence, ok := auth.AuditSendEvidenceFromContext(ctx); ok {
+			sendEvidence = &evidence
+		}
 		if target, ok := auth.AuditTargetFromContext(ctx); ok {
 			targetAlias = target.Alias
 			targetKind = string(target.ResourceKind)
@@ -321,6 +331,7 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 			TargetView:          targetView,
 			TargetCompatibility: targetCompatibility,
 			ConfirmationState:   confirmationState,
+			SendEvidence:        sendEvidence,
 		}
 		EmitAuditLog(entry)
 

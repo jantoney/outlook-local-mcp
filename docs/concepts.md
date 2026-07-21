@@ -110,6 +110,8 @@ Draft creation returns a `draft_ref` bound to the shared mailbox and current Gra
 
 Shared-mail attachment upload requires `shared_resource` plus the target-bound `draft_ref` and is intentionally limited to allowlisted files below 3 MiB. After the draft preflight and local file checks, the server reauthorizes the account, alias, draft policy, reference, client, and exact owner route immediately before the single direct POST. Verification retains that immutable route. Confirmations expose verified name, size, MIME type, attachment ID, shared target, and renewed draft provenance, but never the canonical local path or file content. If Graph accepted the attachment but verification or provenance is incomplete, the result reports `PARTIAL SUCCESS` and warns against repeating the upload until the draft is inspected. Large shared upload sessions are not advertised or started.
 
+The 2026-07-21 compatibility gate had no representative live organizational shared mailbox and disposable large attachment, so it produced no positive route or completion evidence. The support decision is therefore explicit: shared attachments at or above 3 MiB are unsupported and remain locally rejected. Small shared attachments do not imply upload-session compatibility.
+
 ## Mail filing and recovery
 
 `mail.move_message` files one referenced message into one referenced ordinary folder and requires only the selected target's `move` action. The new verb uses the same secure contract for own and shared mail: `message_ref` and `destination_folder_ref` must bind the same account, immutable mailbox, kind, and mailbox view. Existing own read defaults and raw-ID follow-ups remain unchanged; call `list_messages` or `search_messages` with `include_refs=true` to obtain an own source reference.
@@ -122,7 +124,9 @@ Call `list_folders` with `include_refs=true` to resolve the mailbox's well-known
 
 ## Confirmed draft send
 
-`mail.send_draft` requires the exact `send` capability and accepts only an existing draft ID. Draft capability does not imply send. The server fetches the subject, recipients, and attachment names and presents them through MCP elicitation. It sends only after the human explicitly accepts; unsupported elicitation, decline, and cancel all fail safely. Graph acceptance does not confirm final delivery, which remains subject to Exchange processing.
+`mail.send_draft` requires the exact `send` capability and accepts only an existing draft. Draft capability does not imply send. Own mail retains its existing draft-ID flow. Shared mail requires `shared_resource` plus a target-bound `draft_ref`; raw IDs cannot reach the owner route.
+
+Before shared elicitation, the server binds the immutable target, masked delegate and owner presentation, canonical From, nonempty change key, subject, separate normalized To/Cc/Bcc multisets, and every attachment page with identity and metadata. Missing evidence makes send unavailable. The body is not copied into elicitation and must be reviewed in Outlook. After acceptance, authority and the exact snapshot are checked again before one non-retried owner-route POST. Graph acceptance means only accepted for Exchange processing. Exchange chooses Send As or Send on Behalf from configured rights, and the owner's Sent Items is the documented default rather than an exclusive guarantee. Ambiguous outcomes require inspecting the owner's Drafts and Sent Items before any newly reviewed attempt.
 
 ## Headless and non-interactive authentication
 

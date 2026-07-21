@@ -223,6 +223,45 @@ func TestMoveMessageGuardRequiresEnabledTargetBoundSource(t *testing.T) {
 	}
 }
 
+// TestSharedSendGuardRequiresSendAndDraftReference verifies shared send cannot
+// use draft capability, a raw ID, or an unrelated target reference.
+func TestSharedSendGuardRequiresSendAndDraftReference(t *testing.T) {
+	var handlerCalls atomic.Int32
+	client, server := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	inner := mcpserver.ToolHandlerFunc(func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handlerCalls.Add(1)
+		return mcp.NewToolResultText("ok"), nil
+	})
+	registry, entry, codec := sharedMailGuardFixture(t, client, auth.TokenTenantOrganizational)
+	entry.MailAliases[0].Policy.Draft = true
+	result, err := ResolvedTargetGuard(registry, mailSendDraftGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(map[string]any{
+		"shared_resource": "finance-mail", "message_id": "draft-1",
+	}))
+	if err != nil || !result.IsError || handlerCalls.Load() != 0 {
+		t.Fatalf("draft-only/raw result = %+v, calls = %d, error = %v", result, handlerCalls.Load(), err)
+	}
+	entry.MailAliases[0].Policy.Send = true
+	target, err := resource.TargetFromMailAlias(entry.AccountID, entry.MailAliases[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := codec.Sign(resource.ReferenceClaims{
+		AccountID: target.AccountID, ResourceID: target.ResourceID, ResourceKind: target.Kind,
+		MailboxView: target.View, ItemKind: resource.ItemKindDraft,
+		GraphIDChain: []resource.GraphID{{Kind: resource.ItemKindDraft, ID: "draft-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = ResolvedTargetGuard(registry, mailSendDraftGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(map[string]any{
+		"shared_resource": "finance-mail", "draft_ref": reference,
+	}))
+	if err != nil || result.IsError || handlerCalls.Load() != 1 {
+		t.Fatalf("enabled result = %+v, calls = %d, error = %v", result, handlerCalls.Load(), err)
+	}
+}
+
 // sharedMailGuardFixture creates one organizational mailbox alias and signer.
 func sharedMailGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient, tenant auth.TokenTenantContext) (*auth.AccountRegistry, *auth.AccountEntry, resource.ReferenceCodec) {
 	t.Helper()

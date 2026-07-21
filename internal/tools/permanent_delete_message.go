@@ -70,6 +70,7 @@ func handlePermanentDeleteMessage(state *permanentDeleteState) func(context.Cont
 		}
 		if result == nil || result.Action != mcp.ElicitationResponseActionAccept || !elicitationConfirmed(result.Content) {
 			auth.RecordAuditConfirmation(ctx, "declined_or_cancelled")
+			auth.RecordAuditOutcome(ctx, "canceled")
 			return mcp.NewToolResultText("Permanent deletion cancelled; no message was deleted."), nil
 		}
 		current, err := state.load(ctx, target, messageID)
@@ -88,11 +89,14 @@ func handlePermanentDeleteMessage(state *permanentDeleteState) func(context.Cont
 			auth.RecordAuditConfirmation(ctx, "accepted")
 			status := graph.ExtractHTTPStatus(err)
 			if status == 0 || status >= 500 {
+				auth.RecordAuditOutcome(ctx, "uncertain")
 				return mcp.NewToolResultError("permanent deletion outcome is uncertain; do not repeat it until mailbox inspection confirms whether the message remains. Detail: " + target.graphError(err)), nil
 			}
+			auth.RecordAuditOutcome(ctx, "denied")
 			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 		auth.RecordAuditConfirmation(ctx, "accepted")
+		auth.RecordAuditOutcome(ctx, "accepted")
 		response := "Message permanently deleted through Microsoft Graph. Outlook clients cannot recover it; mailbox retention or legal hold may still apply."
 		if line := AccountInfoLine(ctx); line != "" {
 			response += "\n" + line

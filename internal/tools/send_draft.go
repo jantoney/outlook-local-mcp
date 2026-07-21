@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -35,7 +36,7 @@ type sendDraftState struct {
 
 // NewHandleSendDraft creates a handler that sends an existing draft only after
 // an MCP client presents its metadata and a human explicitly accepts.
-func NewHandleSendDraft(retryCfg graph.RetryConfig, timeout time.Duration) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleSendDraft(retryCfg graph.RetryConfig, timeout time.Duration, codecs ...*resource.ReferenceCodec) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	state := &sendDraftState{
 		load: func(ctx context.Context, client *msgraphsdk.GraphServiceClient, messageID string) (draftSendSummary, error) {
 			return loadDraftSendSummary(ctx, client, retryCfg, timeout, messageID)
@@ -49,7 +50,14 @@ func NewHandleSendDraft(retryCfg graph.RetryConfig, timeout time.Duration) func(
 			return client.Me().Messages().ByMessageId(messageID).Send().Post(timeoutCtx, nil)
 		},
 	}
-	return handleSendDraft(state)
+	own := handleSendDraft(state)
+	shared := NewHandleSharedSendDraft(retryCfg, timeout, referenceCodec(codecs))
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if routed, ok := graph.RoutedTargetFromContext(ctx); ok && routed.Target.Alias != "" {
+			return shared(ctx, request)
+		}
+		return own(ctx, request)
+	}
 }
 
 // handleSendDraft implements validation and the mandatory accept-only gate.

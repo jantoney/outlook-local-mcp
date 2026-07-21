@@ -73,6 +73,17 @@ func mailSharedDraftItemGuard() TargetGuardConfig {
 	return config
 }
 
+// mailSendDraftGuard preserves own raw draft IDs while requiring an exact
+// target-bound draft reference and send capability for shared mailboxes.
+func mailSendDraftGuard() TargetGuardConfig {
+	return TargetGuardConfig{
+		Family: resource.TargetFamilyMail, Capability: resource.TargetCapability(resource.MailCapabilitySend),
+		AllowedKinds:      []resource.ResourceKind{resource.ResourceKindOwnMailbox, resource.ResourceKindMailbox},
+		ReferenceArgument: "draft_ref", RequireSharedReference: true,
+		RawIDArgument: "message_id", ItemKind: resource.ItemKindDraft,
+	}
+}
+
 // mailMoveMessageGuard requires the exact move capability and a source
 // message reference for both own and shared mailbox targets.
 func mailMoveMessageGuard() TargetGuardConfig {

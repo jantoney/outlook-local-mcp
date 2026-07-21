@@ -169,6 +169,8 @@ Shared mailboxes require a validated organizational token context and existing E
 
 Call `account.list_mail_aliases` to review the exact target policy and compatibility. Enabling shared send additionally requires Exchange Send As or Send on Behalf rights and the separate confirmed-draft workflow.
 
+Shared draft attachments are limited to allowlisted files smaller than 3 MiB. Large shared upload sessions are unsupported because the required live organizational-mailbox compatibility evidence is unavailable; own-mail resumable attachments remain supported through 150 MiB.
+
 ## 7. Configuration
 
 All environment variables are prefixed with `OUTLOOK_MCP_`:

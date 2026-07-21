@@ -395,6 +395,7 @@ func TestAuditWrapCapturesConfirmationState(t *testing.T) {
 	setAuditState(t, true, &buf)
 	handler := func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		auth.RecordAuditConfirmation(ctx, "accepted")
+		auth.RecordAuditSendEvidence(ctx, auth.AuditSendEvidence{RecipientCount: 2, AttachmentCount: 1, ReferenceFingerprint: "keyed", SendAttempt: true})
 		return mcp.NewToolResultText("deleted"), nil
 	}
 	_, _ = AuditWrap("mail.permanent_delete_message", "delete", handler)(context.Background(), mcp.CallToolRequest{})
@@ -402,8 +403,27 @@ func TestAuditWrapCapturesConfirmationState(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
 		t.Fatal(err)
 	}
-	if entry.ConfirmationState != "accepted" || entry.MailCapability != "permanent_delete" {
+	if entry.ConfirmationState != "accepted" || entry.MailCapability != "permanent_delete" || entry.SendEvidence == nil || !entry.SendEvidence.SendAttempt {
 		t.Fatalf("confirmation audit = %+v", entry)
+	}
+}
+
+// TestAuditWrapPreservesRecordedUncertainError verifies an ambiguous Graph
+// result is not flattened to a generic error outcome.
+func TestAuditWrapPreservesRecordedUncertainError(t *testing.T) {
+	var buf bytes.Buffer
+	setAuditState(t, true, &buf)
+	handler := func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		auth.RecordAuditOutcome(ctx, "uncertain")
+		return mcp.NewToolResultError("outcome uncertain"), nil
+	}
+	_, _ = AuditWrap("mail.send_draft", "send", handler)(context.Background(), mcp.CallToolRequest{})
+	var entry AuditEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Outcome != "uncertain" {
+		t.Fatalf("outcome = %q", entry.Outcome)
 	}
 }
 

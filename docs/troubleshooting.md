@@ -355,6 +355,10 @@ Shared `add_attachment` accepts only an allowlisted local file smaller than 3 Mi
 
 Check the exact action on the selected own-mail policy or shared alias; enabling ordinary move does not enable Archive, trash, restore, or permanent deletion. Restore also requires the current message parent to be Deleted Items and an ordinary same-target destination reference. Recoverable Items restoration is intentionally unsupported. Permanent deletion additionally requires interactive MCP elicitation for every unchanged message; unsupported, declined, stale, or failed elicitation dispatches no delete. After an uncertain destructive response, inspect the mailbox before a separately reviewed attempt.
 
+## Shared draft send is denied or uncertain {#shared-send}
+
+OAuth `Mail.Send.Shared` does not grant Exchange delegation. Shared send also needs mailbox/folder access and either Send As or Send on Behalf rights configured by Exchange. `ErrorSendAsDenied` points to those sender rights; a generic access error can also involve `Mail.ReadWrite.Shared`, Full Access or folder rights, or tenant policy, so the server does not claim an unobserved exact cause. Missing From, change key, recipients, or complete attachment pages also fails closed. After an uncertain POST, inspect the owner's Drafts and Sent Items before creating a fresh review; never retry the old confirmation.
+
 ---
 
 ## In-server documentation access

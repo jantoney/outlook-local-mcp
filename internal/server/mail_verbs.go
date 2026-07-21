@@ -91,11 +91,6 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 	empty := make(tools.VerbRegistry)
 	registryPtr := &empty
 
-	// wrapWrite adds ReadOnlyGuard between observability and audit for write verbs.
-	wrapWrite := func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
-		h = auth.RequireMailCapability(requiredMailCapability(name), h)
-		return tools.Handler(c.accountResolverMW(c.authMW(observability.WithObservability(name, c.m, c.tracer, ReadOnlyGuard(name, c.readOnly, audit.AuditWrap(name, auditOp, h))))))
-	}
 	wrapTarget := func(guard TargetGuardConfig) func(string, string, mcpserver.ToolHandlerFunc) tools.Handler {
 		return func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
 			h = ResolvedTargetGuard(c.registry, guard, c.referenceCodec, h)
@@ -131,7 +126,7 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildTrashMessageVerb(c, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityTrash))),
 		buildRestoreMessageVerb(c, rc, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityRestore))),
 		buildPermanentDeleteMessageVerb(c, rc, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityPermanentDelete))),
-		buildSendDraftVerb(c, rc, wrapWrite),
+		buildSendDraftVerb(c, rc, wrapTargetWrite(mailSendDraftGuard())),
 	}
 	for index := range verbs {
 		if verbs[index].Name != "help" {
@@ -193,9 +188,9 @@ func buildSendDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite func(
 	return tools.Verb{
 		Name:        "send_draft",
 		Summary:     "send an existing draft after explicit human confirmation",
-		Description: "Fetches an existing draft's subject, recipients, and attachment names, presents them through MCP elicitation, and sends only when the human accepts. Requires the exact send capability; there is no boolean confirmation parameter.",
+		Description: "Sends only an existing draft after MCP human elicitation and requires the exact send capability; there is no boolean confirmation parameter. Own mail retains message_id behavior. Shared mail requires shared_resource plus draft_ref, complete owner-route review evidence, an unchanged post-confirmation snapshot, and one non-retried send POST. Exchange chooses Send As or Send on Behalf from configured rights.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#confirmed-draft-send"},
-		Handler:     wrapWrite("mail.send_draft", "send", tools.NewHandleSendDraft(rc, c.timeout)),
+		Handler:     wrapWrite("mail.send_draft", "send", tools.NewHandleSendDraft(rc, c.timeout, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -203,7 +198,9 @@ func buildSendDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite func(
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
-			mcp.WithString("message_id", mcp.Required(), mcp.Description("The existing draft message ID.")),
+			mcp.WithString("message_id", mcp.Description("Own-mail existing draft message ID. Rejected with shared_resource.")),
+			mcp.WithString("draft_ref", mcp.Description("Target-bound existing draft reference required with shared_resource.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("account", mcp.Description("Account label or UPN to use.")),
 		},
 	}
