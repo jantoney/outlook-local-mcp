@@ -639,7 +639,9 @@ Call `{tool: "mail", args: {operation: "get_conversation", id: "<conversation ID
 
 With a genuinely delegated organizational shared mailbox, enable only its `draft` action. Verify a shared `create_draft` returns a target-bound `draft_ref`, then update and delete it using `shared_resource` plus that reference. For reply and forward coverage, first obtain a shared `message_ref` from the same alias and verify each derived draft returns its own `draft_ref`. Confirm all calls remain on `/users/{owner}/messages` routes.
 
-For denial coverage, try each shared draft verb with `draft` disabled, pass a raw `message_id` beside `shared_resource`, pass a draft reference from another alias or mailbox view, and revoke the alias policy between the `isDraft` preflight and update/delete mutation. **Verify:** every denied call stops locally or after the preflight GET with no mutation. If reply/forward creation reports `PARTIAL SUCCESS`, record the returned recovery identifiers and do not repeat the create operation.
+If an operator supplied a safe file below 3 MiB under `OUTLOOK_MCP_ATTACHMENT_ROOTS`, attach it to the referenced shared draft with `add_attachment`. **Verify:** the route is `/users/{owner}/messages/{draft-id}/attachments`, the confirmation includes verified attachment metadata, shared target, and renewed draft provenance, and it exposes neither the canonical local path nor content. Try a file at least 3 MiB and verify no shared upload session starts.
+
+For denial coverage, try each shared draft verb with `draft` disabled, pass a raw `message_id` beside `shared_resource`, pass a draft reference from another alias or mailbox view, and revoke the alias policy between the `isDraft` preflight and update/delete or attachment mutation. **Verify:** every denied call stops locally or after the preflight GET with no mutation. If draft creation or attachment upload reports `PARTIAL SUCCESS`, record the returned recovery identifiers and do not repeat the mutation until the existing draft is inspected.
 
 ### Step 36 -- Get attachment
 

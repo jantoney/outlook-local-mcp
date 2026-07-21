@@ -106,7 +106,9 @@ Draft creation returns a `draft_ref` bound to the shared mailbox and current Gra
 
 ## Local draft attachments
 
-`mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
+`mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Own-mail files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
+
+Shared-mail attachment upload requires `shared_resource` plus the target-bound `draft_ref` and is intentionally limited to allowlisted files below 3 MiB. After the draft preflight and local file checks, the server reauthorizes the account, alias, draft policy, reference, client, and exact owner route immediately before the single direct POST. Verification retains that immutable route. Confirmations expose verified name, size, MIME type, attachment ID, shared target, and renewed draft provenance, but never the canonical local path or file content. If Graph accepted the attachment but verification or provenance is incomplete, the result reports `PARTIAL SUCCESS` and warns against repeating the upload until the draft is inspected. Large shared upload sessions are not advertised or started.
 
 ## Confirmed draft send
 

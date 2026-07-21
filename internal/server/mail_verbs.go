@@ -125,7 +125,7 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildCreateForwardDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftSourceGuard())),
 		buildUpdateDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildDeleteDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
-		buildAddAttachmentVerb(c, rc, wrapWrite),
+		buildAddAttachmentVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildSendDraftVerb(c, rc, wrapWrite),
 	}
 	for index := range verbs {
@@ -177,10 +177,10 @@ func buildSendDraftVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite func(
 func buildAddAttachmentVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
 	return tools.Verb{
 		Name:        "add_attachment",
-		Summary:     "attach one allowlisted local file to an existing draft",
-		Description: "Adds one local file to an existing draft. The canonical file path must be inside OUTLOOK_MCP_ATTACHMENT_ROOTS. Files below 3 MiB use direct upload; larger files through 150 MiB use a resumable session. Requires the exact draft capability.",
+		Summary:     "attach one allowlisted local file to an own or shared draft",
+		Description: "Adds one local file to an existing draft. Shared calls require shared_resource plus draft_ref and support direct files below 3 MiB through the exact owner route. Own drafts retain resumable upload through 150 MiB. The canonical path must be inside OUTLOOK_MCP_ATTACHMENT_ROOTS. Requires the exact draft capability.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#local-draft-attachments"},
-		Handler:     wrapWrite("mail.add_attachment", "write", tools.NewHandleAddAttachment(rc, c.timeout, c.cfg.AttachmentRoots, nil)),
+		Handler:     wrapWrite("mail.add_attachment", "write", tools.NewHandleAddAttachment(rc, c.timeout, c.cfg.AttachmentRoots, nil, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -188,7 +188,9 @@ func buildAddAttachmentVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite f
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
-			mcp.WithString("message_id", mcp.Required(), mcp.Description("The existing draft message ID.")),
+			mcp.WithString("message_id", mcp.Description("Own-mail draft message ID. Rejected with shared_resource.")),
+			mcp.WithString("draft_ref", mcp.Description("Target-bound shared draft reference.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("file_path", mcp.Required(), mcp.Description("Local file path inside a configured attachment root.")),
 			mcp.WithString("account", mcp.Description("Account label or UPN to use.")),
 		},

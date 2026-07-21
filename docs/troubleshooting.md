@@ -339,6 +339,12 @@ A reply or forward draft can be created successfully before its required provena
 
 **Remedy:** Do not repeat the create operation because that can create a duplicate. If the alias still permits `draft`, inspect or update the existing draft with its `draft_ref`; otherwise open the configured shared mailbox's Drafts folder in Outlook and locate the reported draft ID or subject. A later policy change does not make the reference an authorization token: every use is checked again.
 
+## Shared attachment upload is rejected or partially verified {#shared-attachment-upload}
+
+Shared `add_attachment` accepts only an allowlisted local file smaller than 3 MiB, `shared_resource`, and a matching `draft_ref`. A disabled draft policy, removed or changed alias, non-draft reference, path escape, or session-sized file stops before upload. A `PARTIAL SUCCESS` result means the direct Graph mutation completed but its metadata verification or renewed provenance did not.
+
+**Remedy:** Do not repeat a partial or uncertain upload until you inspect the existing shared draft in Outlook; repeating it can attach a duplicate. For a local denial, obtain a fresh `draft_ref` from the exact shared mailbox, confirm `draft` is enabled, and choose a file under `OUTLOOK_MCP_ATTACHMENT_ROOTS` smaller than 3 MiB. Use the existing own-mail workflow for resumable files through 150 MiB.
+
 ---
 
 ## In-server documentation access

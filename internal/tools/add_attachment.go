@@ -14,6 +14,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -23,19 +24,22 @@ import (
 const maxGraphAttachmentSize int64 = 150 * 1024 * 1024
 
 // NewHandleAddAttachment creates a draft-only local file attachment handler.
-// It selects direct or resumable Graph upload according to the raw file size.
-func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, roots []string, httpClient *http.Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// Own drafts select direct or resumable upload by size. Shared drafts require a
+// verified draft reference and support only the launch-validated direct path.
+// The optional codec signs renewed shared draft provenance. Side effects include
+// reading one allowlisted local file and mutating the exact routed Graph draft.
+func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, roots []string, httpClient *http.Client, codecs ...*resource.ReferenceCodec) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		client, err := GraphClient(ctx)
+		target, err := mailTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
-		messageID, err := request.RequireString("message_id")
-		if err != nil || messageID == "" {
-			return mcp.NewToolResultError("missing required parameter: message_id"), nil
+		messageID, err := target.draftID(request.GetString("message_id", ""))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		filePath, err := request.RequireString("file_path")
 		if err != nil || filePath == "" {
@@ -44,7 +48,7 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 		if err := validate.ValidateResourceID(messageID, "message_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if result := verifyIsDraft(ctx, client, retryCfg, timeout, messageID, logging.Logger(ctx)); result != nil {
+		if result := verifyRoutedIsDraft(ctx, target, retryCfg, timeout, messageID, logging.Logger(ctx)); result != nil {
 			return result, nil
 		}
 		canonical, err := validate.AttachmentPath(filePath, roots)
@@ -63,6 +67,9 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 		if info.Size() > maxGraphAttachmentSize {
 			return mcp.NewToolResultError("attachment exceeds Microsoft Graph 150 MiB limit"), nil
 		}
+		if target.isShared() && info.Size() >= attachmentChunkSize {
+			return mcp.NewToolResultError("shared mailbox attachment upload currently supports allowlisted files smaller than 3 MiB; no upload was started"), nil
+		}
 		contentType := mime.TypeByExtension(filepath.Ext(info.Name()))
 		if contentType == "" {
 			contentType = "application/octet-stream"
@@ -78,15 +85,21 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 			attachment.SetName(valuePtr(info.Name()))
 			attachment.SetContentType(valuePtr(contentType))
 			attachment.SetContentBytes(content)
+			if err := revalidateMailTarget(ctx, target); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			var created models.Attachmentable
 			directCtx, directCancel := graph.WithTimeout(ctx, timeout)
-			created, postErr := client.Me().Messages().ByMessageId(messageID).Attachments().Post(directCtx, attachment, nil)
+			created, postErr := target.root.Messages().ByMessageId(messageID).Attachments().Post(directCtx, attachment, nil)
 			directCancel()
 			if postErr != nil {
-				return mcp.NewToolResultError(graph.RedactGraphError(postErr)), nil
+				return mcp.NewToolResultError(attachmentMutationError(target, postErr)), nil
 			}
 			attachmentID = graph.SafeStr(created.GetId())
 			if attachmentID == "" {
+				if target.isShared() {
+					return mcp.NewToolResultText(sharedAttachmentPartial(ctx, target, referenceCodec(codecs), messageID, "", info.Name(), info.Size(), contentType, "Graph accepted the attachment but returned no attachment ID")), nil
+				}
 				return mcp.NewToolResultError("attachment upload completed without a verified attachment ID"), nil
 			}
 		} else {
@@ -104,7 +117,7 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 			sessionCtx, sessionCancel := graph.WithTimeout(ctx, timeout)
 			sessionErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var callErr error
-				session, callErr = client.Me().Messages().ByMessageId(messageID).Attachments().CreateUploadSession().Post(sessionCtx, body, nil)
+				session, callErr = target.root.Messages().ByMessageId(messageID).Attachments().CreateUploadSession().Post(sessionCtx, body, nil)
 				return callErr
 			})
 			sessionCancel()
@@ -126,17 +139,23 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 		var verified models.Attachmentable
 		verifyErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var callErr error
-			verified, callErr = client.Me().Messages().ByMessageId(messageID).Attachments().ByAttachmentId(attachmentID).Get(verifyCtx, nil)
+			verified, callErr = target.root.Messages().ByMessageId(messageID).Attachments().ByAttachmentId(attachmentID).Get(verifyCtx, nil)
 			return callErr
 		})
 		verifyCancel()
 		if verifyErr != nil || verified == nil || graph.SafeStr(verified.GetId()) != attachmentID {
+			if target.isShared() {
+				return mcp.NewToolResultText(sharedAttachmentPartial(ctx, target, referenceCodec(codecs), messageID, attachmentID, info.Name(), info.Size(), contentType, "attachment verification did not confirm the completed Graph mutation")), nil
+			}
 			return mcp.NewToolResultError("attachment upload completed but the attachment could not be verified"), nil
 		}
 		verifiedName := graph.SafeStr(verified.GetName())
 		verifiedType := graph.SafeStr(verified.GetContentType())
 		verifiedSizeValue := verified.GetSize()
 		if verifiedName == "" || verifiedType == "" || verifiedSizeValue == nil {
+			if target.isShared() {
+				return mcp.NewToolResultText(sharedAttachmentPartial(ctx, target, referenceCodec(codecs), messageID, attachmentID, info.Name(), info.Size(), contentType, "attachment verification omitted name, size, or content type")), nil
+			}
 			return mcp.NewToolResultError("attachment verification omitted name, size, or content type"), nil
 		}
 		verifiedSize := int64(*verifiedSizeValue)
@@ -144,10 +163,15 @@ func NewHandleAddAttachment(retryCfg graph.RetryConfig, timeout time.Duration, r
 		if accountLine != "" {
 			accountLine = "\n" + accountLine
 		}
-		return mcp.NewToolResultText(fmt.Sprintf(
+		response := fmt.Sprintf(
 			"Attached %s (%d bytes, %s) to draft.\nDraft ID: %s\nAttachment ID: %s\nUpload: %s%s",
 			verifiedName, verifiedSize, verifiedType, messageID, attachmentID, mode, accountLine,
-		)), nil
+		)
+		response, err = sharedAttachmentConfirmation(response, target, referenceCodec(codecs), messageID)
+		if err != nil {
+			return mcp.NewToolResultText(sharedAttachmentPartial(ctx, target, referenceCodec(codecs), messageID, attachmentID, verifiedName, verifiedSize, verifiedType, err.Error())), nil
+		}
+		return mcp.NewToolResultText(response), nil
 	}
 }
 
