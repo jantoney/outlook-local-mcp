@@ -84,6 +84,10 @@ Use `account.discover_calendar_aliases`, then `account.add_calendar_alias`. List
 
 Shared calendar read contributes `Calendars.Read.Shared`; manage contributes `Calendars.ReadWrite.Shared`. These join the account-wide OAuth scope union but do not replace target-local authorization or Exchange sharing rights.
 
+`calendar.list_events` and `calendar.search_events` accept `shared_resource` for an approved owner-primary alias and route only through that owner's `/users/{owner}/calendarView`. Their shared text and summary results expose a signed `resource_ref` for each event. A shared `calendar.get_event` must receive that reference with the same alias; it rejects raw `event_id` addressing. References bind the account, immutable resource identity, owner mailbox view, item kind, and Graph ID, and are revalidated against current configuration on every use. Removing and recreating an alias invalidates its old references even when the human alias is reused.
+
+Raw shared-event output keeps the existing Graph-derived event object or array under `data` and returns signed references separately under `provenance`. This sidecar preserves the raw event shape instead of injecting local fields. Omitting `shared_resource` preserves existing own-calendar `/me` routes, raw `event_id` follow-ups, and response shapes.
+
 ## Shared mail aliases
 
 A shared-mail alias is a separate account-scoped allowlist entry for one owner-view mailbox routed through `/users/{owner}/...`. It has an immutable resource ID, owner, `mailbox` kind, and `owner` mailbox view. Renaming changes only the human selector and preserves identity. Retargeting requires idempotent removal and recreation, which creates a new identity and invalidates old target-bound references. A calendar and mail alias may use the same selector and owner without becoming the same resource.

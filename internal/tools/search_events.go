@@ -18,6 +18,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	abstractions "github.com/microsoft/kiota-abstractions-go"
@@ -146,7 +147,8 @@ func NewSearchEventsTool(provenanceEnabled bool) mcp.Tool {
 //   - Applies client-side category filtering when categories parameter is provided.
 //   - Limits results to max_results.
 //   - Serializes events using SerializeEvent and returns a JSON array.
-func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+//   - Uses the optional codec to issue shared target-bound event references.
+func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
@@ -154,6 +156,13 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 		client, err := GraphClient(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
+		}
+		target, err := calendarTargetFromContext(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if !target.supportsOwnerRead() {
+			return mcp.NewToolResultError("calendar target kind is not enabled for this read surface"), nil
 		}
 
 		// Validate output mode.
@@ -321,7 +330,7 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 		// that events beyond the first page are scanned when needed.
 		clientFilter := buildClientFilter(query, categories)
 
-		events, err := executeSearchCalendarView(timeoutCtx, client, retryCfg, startDatetime, endDatetime, filterStr, timezone, maxResults, expandFilter, serializeFn, clientFilter)
+		events, err := executeSearchCalendarView(timeoutCtx, client, target.root, retryCfg, startDatetime, endDatetime, filterStr, timezone, maxResults, expandFilter, serializeFn, clientFilter)
 		if err != nil {
 			if graph.IsTimeoutError(err) {
 				logger.ErrorContext(ctx, "request timed out",
@@ -342,6 +351,10 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 				events[i] = graph.ToSummaryEventMap(e)
 			}
 		}
+		payload, err := addSharedEventReferences(events, target, referenceCodec(codecs), outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Return text output when requested.
 		if outputMode == "text" {
@@ -351,7 +364,7 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 			return mcp.NewToolResultText(FormatEventsText(events)), nil
 		}
 
-		jsonBytes, err := json.Marshal(events)
+		jsonBytes, err := json.Marshal(payload)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),
@@ -384,6 +397,7 @@ const searchPageSize = 50
 // Parameters:
 //   - ctx: the request context.
 //   - graphClient: the authenticated Microsoft Graph client.
+//   - root: the one typed Me or Users.ByUserId request root selected locally.
 //   - retryCfg: retry configuration for transient Graph API errors.
 //   - startDatetime: the CalendarView start boundary in ISO 8601 format.
 //   - endDatetime: the CalendarView end boundary in ISO 8601 format.
@@ -403,6 +417,7 @@ const searchPageSize = 50
 func executeSearchCalendarView(
 	ctx context.Context,
 	graphClient *msgraphsdk.GraphServiceClient,
+	root *users.UserItemRequestBuilder,
 	retryCfg graph.RetryConfig,
 	startDatetime, endDatetime, filter, timezone string,
 	maxResults int,
@@ -455,7 +470,7 @@ func executeSearchCalendarView(
 	var resp models.EventCollectionResponseable
 	if graphErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
 		var err error
-		resp, err = graphClient.Me().CalendarView().Get(ctx, cfg)
+		resp, err = root.CalendarView().Get(ctx, cfg)
 		return err
 	}); graphErr != nil {
 		return nil, graphErr

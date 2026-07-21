@@ -538,6 +538,10 @@ To verify AC-5 manually:
 7. Recreate the original alias name with profile `off`. **Pass:** the new `resource_id` differs from the removed identity. Remove the recreated test alias as cleanup.
 8. When read-only mode is enabled, **verify** add, rename, remove, profile, and reselection mutations are rejected before persistence or Graph traffic.
 9. If a genuinely shared mounted calendar is available, call `discover_calendar_aliases`; have the user select one returned ID; add it only with `confirm_mounted_selection: true`. **Fail:** if creation accepts an unconfirmed ID, an ID owned by another resource, or silently chooses a candidate.
+10. If an organizational owner-primary calendar is genuinely delegated to the selected account, add or update its alias to profile `read`, reconnect if the scope union changed, and call `calendar.list_events` in text, summary, and raw modes with `shared_resource`. **Verify:** text and summary expose signed `resource_ref` values; raw keeps event data under `data` and references under the separate `provenance` sidecar.
+11. Call `calendar.search_events` with the same alias and verify matching results also carry references. Use one returned reference with `calendar.get_event`, the same account, and the same alias. **Pass:** the event is returned without supplying `event_id`.
+12. Retry shared `get_event` with a tampered reference and with `event_id` plus the alias. Remove the alias and retry the original valid reference. **Pass:** every call is rejected locally and no Graph request occurs. Recreate only if needed for later manual testing; a recreated alias must not revive the old reference.
+13. If no genuinely delegated owner-primary calendar is available, record shared owner read as **SKIP**; do not invent an owner or weaken the negative checks.
 
 ### Step 29e -- Shared-mail alias lifecycle and action policy
 

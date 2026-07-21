@@ -10,6 +10,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/docs"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/observability"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/tools"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -50,8 +51,12 @@ import (
 //
 // Side effects: registers tool handlers on the server and logs a completion
 // message.
-func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout time.Duration, m *observability.ToolMetrics, t trace.Tracer, readOnly bool, authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc, registry *auth.AccountRegistry, cfg config.Config, cred auth.Authenticator) {
+func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout time.Duration, m *observability.ToolMetrics, t trace.Tracer, readOnly bool, authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc, registry *auth.AccountRegistry, cfg config.Config, cred auth.Authenticator, referenceCodecs ...*resource.ReferenceCodec) {
 	accountResolverMW := auth.AccountResolver(registry)
+	var referenceCodec *resource.ReferenceCodec
+	if len(referenceCodecs) > 0 {
+		referenceCodec = referenceCodecs[0]
+	}
 
 	// CR-0040: Build provenance property ID once at startup. Empty when
 	// provenance tagging is disabled (cfg.ProvenanceTag == "").
@@ -73,6 +78,8 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 	// updated with the populated map so that the help verb can introspect all
 	// registered verbs at call time (not at construction time).
 	calVerbs, calRegistry := buildCalendarVerbs(calendarVerbsConfig{
+		registry:             registry,
+		referenceCodec:       referenceCodec,
 		retryCfg:             retryCfg,
 		timeout:              timeout,
 		defaultTimezone:      cfg.DefaultTimezone,

@@ -58,7 +58,7 @@
   "tools": [
     {
       "name": "calendar",
-      "description": "Calendar operations for Microsoft Outlook via Microsoft Graph. Required operation: help (detailed docs), list_calendars (list user calendars), list_events (list events in a window), get_event (fetch one event), search_events (query events by subject and filters), create_event (personal event without attendees), update_event (edit personal event), delete_event (remove personal event), respond_event (accept/decline invitation), reschedule_event (move personal event), create_meeting (event with attendees), update_meeting (edit meeting with attendee changes), cancel_meeting (cancel and notify attendees), reschedule_meeting (move meeting and notify), get_free_busy (check availability)."
+      "description": "Calendar operations for Microsoft Outlook via Microsoft Graph. Owner-primary shared list/get/search reads use account-scoped aliases and signed target-bound event references; omitting an alias preserves own-calendar behavior. Required operation: help (detailed docs), list_calendars, list_events, get_event, search_events, create_event, update_event, delete_event, respond_event, reschedule_event, create_meeting, update_meeting, cancel_meeting, reschedule_meeting, get_free_busy."
     },
     {
       "name": "mail",

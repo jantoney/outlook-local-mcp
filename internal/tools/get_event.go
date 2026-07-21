@@ -15,6 +15,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	abstractions "github.com/microsoft/kiota-abstractions-go"
@@ -88,22 +89,27 @@ func NewGetEventTool() mcp.Tool {
 //   - Applies a comprehensive $select and optional $expand covering all event fields.
 //   - Sets the Prefer header for timezone when provided.
 //   - Serializes the event including body, attendees, recurrence, and metadata.
+//   - Uses the optional codec to issue shared target-bound event references.
 //   - Returns Graph API errors via mcp.NewToolResultError with FormatGraphError.
 //   - Logs entry at debug level, completion at info level, errors at error level.
-func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
 
-		client, err := GraphClient(ctx)
+		target, err := calendarTargetFromContext(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
+		if !target.supportsOwnerRead() {
+			return mcp.NewToolResultError("calendar target kind is not enabled for this read surface"), nil
+		}
 
-		// Extract required parameter.
-		eventID, err := request.RequireString("event_id")
-		if err != nil || eventID == "" {
-			return mcp.NewToolResultError("missing required parameter: event_id. Tip: Use calendar_list_events or calendar_search_events to find the event ID."), nil
+		// Own reads retain raw event IDs; shared reads derive IDs only from
+		// reference claims verified by the target guard.
+		eventID, err := target.eventID(request.GetString("event_id", ""))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := validate.ValidateResourceID(eventID, "event_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -160,7 +166,7 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		var event models.Eventable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			event, graphErr = client.Me().Events().ByEventId(eventID).Get(timeoutCtx, cfg)
+			event, graphErr = target.root.Events().ByEventId(eventID).Get(timeoutCtx, cfg)
 			return graphErr
 		})
 		if err != nil {
@@ -329,6 +335,10 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 				result["lastModifiedDateTime"] = ""
 			}
 		}
+		payload, err := addSharedEventReference(result, target, referenceCodec(codecs), outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Return text output when requested.
 		if outputMode == "text" {
@@ -338,7 +348,7 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 			return mcp.NewToolResultText(FormatEventDetailText(result)), nil
 		}
 
-		jsonBytes, err := json.Marshal(result)
+		jsonBytes, err := json.Marshal(payload)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),

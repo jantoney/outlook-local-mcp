@@ -307,6 +307,14 @@ If Graph no longer returns a configured mounted calendar ID, the server does not
 
 ---
 
+## Shared calendar reference is rejected {#shared-calendar-reference-rejected}
+
+A shared event reference is valid only for the account, immutable calendar resource, mailbox view, and event from which it was issued. It also stops resolving when the alias is removed and recreated, even if the same alias text is reused. Passing `event_id` with `shared_resource`, changing aliases, or altering the signed value fails locally before Graph.
+
+**Remedy:** Confirm the intended account and alias still exist with `account.list_calendar_aliases`, then call `calendar.list_events` or `calendar.search_events` again for that exact target and use the newly returned `resource_ref`. If Graph denies the owner route, verify the owner shared or delegated the primary calendar to the signed-in organizational account; OAuth consent alone does not create Exchange access.
+
+---
+
 ## Shared mailbox is incompatible {#shared-mail-incompatible}
 
 Shared-mail configuration and use require authoritative token evidence for an organizational Microsoft 365 tenant. Personal Microsoft accounts and unknown token contexts fail closed before Graph traffic, regardless of granted OAuth scopes.

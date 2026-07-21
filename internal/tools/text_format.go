@@ -66,6 +66,9 @@ func FormatEventsText(events []map[string]any) string {
 		if organizer != "" {
 			fmt.Fprintf(&b, "   Organizer: %s\n", organizer)
 		}
+		if reference, _ := e["resource_ref"].(string); reference != "" {
+			fmt.Fprintf(&b, "   Resource Ref: %s\n", reference)
+		}
 
 		// Blank line between events.
 		if i < len(events)-1 {
@@ -119,6 +122,9 @@ func FormatEventDetailText(event map[string]any) string {
 	showAs, _ := event["showAs"].(string)
 	if showAs != "" {
 		fmt.Fprintf(&b, "Status: %s\n", strings.Title(showAs)) //nolint:staticcheck // strings.Title is sufficient for single-word enum values
+	}
+	if reference, _ := event["resource_ref"].(string); reference != "" {
+		fmt.Fprintf(&b, "Resource Ref: %s\n", reference)
 	}
 
 	// Attendees list.

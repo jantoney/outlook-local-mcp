@@ -18,11 +18,19 @@ type TargetGuardConfig struct {
 	Family resource.TargetFamily
 	// Capability is the exact target-local action required by the verb.
 	Capability resource.TargetCapability
+	// AllowedKinds restricts the verb to exact resource kinds after alias
+	// resolution and before route selection. Empty accepts every family kind.
+	AllowedKinds []resource.ResourceKind
 	// ReferenceArgument names the optional signed-reference input. Empty uses
 	// `resource_ref` when RequireReference is true and otherwise ignores refs.
 	ReferenceArgument string
 	// RequireReference rejects calls without a signed target-bound reference.
 	RequireReference bool
+	// RequireSharedReference requires provenance only when shared_resource is
+	// selected, preserving own-resource raw-ID compatibility.
+	RequireSharedReference bool
+	// RawIDArgument names an own-resource raw-ID input that shared calls reject.
+	RawIDArgument string
 	// ItemKind is the exact signed item kind consumed by the verb.
 	ItemKind resource.ItemKind
 }
@@ -48,8 +56,13 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 			return mcp.NewToolResultError(fmt.Sprintf("account %q has no Graph client", entry.Label)), nil
 		}
 
+		sharedResource := request.GetString("shared_resource", "")
+		requireReference := config.RequireReference || (config.RequireSharedReference && sharedResource != "")
+		if sharedResource != "" && config.RawIDArgument != "" && request.GetString(config.RawIDArgument, "") != "" {
+			return mcp.NewToolResultError(fmt.Sprintf("shared resource follow-up requires resource_ref and does not accept %s", config.RawIDArgument)), nil
+		}
 		referenceArgument := config.ReferenceArgument
-		if referenceArgument == "" && config.RequireReference {
+		if referenceArgument == "" && requireReference {
 			referenceArgument = "resource_ref"
 		}
 		reference := ""
@@ -57,12 +70,15 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 			reference = request.GetString(referenceArgument, "")
 		}
 		resolved, err := auth.ResolveTarget(entry, auth.TargetRequest{
-			Family: config.Family, SharedResource: request.GetString("shared_resource", ""),
+			Family: config.Family, SharedResource: sharedResource,
 			Capability: config.Capability, Reference: reference,
-			RequireReference: config.RequireReference, ItemKind: config.ItemKind,
+			RequireReference: requireReference, ItemKind: config.ItemKind,
 		}, codec)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if !targetKindAllowed(resolved.Target.Kind, config.AllowedKinds) {
+			return mcp.NewToolResultError(fmt.Sprintf("resource kind %q is not supported by this operation", resolved.Target.Kind)), nil
 		}
 		root, err := graph.SelectUserRoot(entry.Client, resolved.Target)
 		if err != nil {
@@ -79,4 +95,18 @@ func ResolvedTargetGuard(registry *auth.AccountRegistry, config TargetGuardConfi
 		})
 		return handler(ctx, request)
 	}
+}
+
+// targetKindAllowed reports whether kind is in the operation allowlist. An
+// empty allowlist preserves family-wide behavior for existing guard users.
+func targetKindAllowed(kind resource.ResourceKind, allowed []resource.ResourceKind) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, candidate := range allowed {
+		if kind == candidate {
+			return true
+		}
+	}
+	return false
 }

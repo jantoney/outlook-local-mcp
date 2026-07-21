@@ -16,6 +16,7 @@ import (
 
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/validate"
 	"github.com/mark3labs/mcp-go/mcp"
 	abstractions "github.com/microsoft/kiota-abstractions-go"
@@ -90,6 +91,7 @@ func NewListEventsTool() mcp.Tool {
 //   - provenancePropertyID: the full provenance property ID string, built once at
 //     startup. When non-empty, $expand is added to request the provenance extended
 //     property, and serialized events include "createdByMcp" when tagged.
+//   - codecs: optional restart-stable signer used only for shared event results.
 //
 // Returns a tool handler function compatible with the MCP server's AddTool method.
 //
@@ -98,14 +100,14 @@ func NewListEventsTool() mcp.Tool {
 //   - Resolves the date convenience parameter to start_datetime/end_datetime when
 //     explicit values are not provided.
 //   - Extracts and validates required parameters (start_datetime, end_datetime).
-//   - Routes to /me/calendarView or /me/calendars/{id}/calendarView based on calendar_id.
+//   - Routes through the guarded typed user root, preserving own calendar_id behavior.
 //   - Applies $select, $orderby, $top, and $expand query parameters.
 //   - Sets the Prefer header for timezone when provided.
 //   - Uses PageIterator for pagination with a max_results cap.
 //   - Serializes events using SerializeEvent from the graph package.
 //   - Returns Graph API errors via mcp.NewToolResultError with FormatGraphError.
 //   - Logs entry at debug level, completion at info level, errors at error level.
-func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone, provenancePropertyID string) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defaultTimezone, provenancePropertyID string, codecs ...*resource.ReferenceCodec) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger := logging.Logger(ctx)
 		start := time.Now()
@@ -113,6 +115,13 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 		client, err := GraphClient(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
+		}
+		target, err := calendarTargetFromContext(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if !target.supportsOwnerRead() {
+			return mcp.NewToolResultError("calendar target kind is not enabled for this read surface"), nil
 		}
 
 		// Resolve date convenience parameter to start/end datetimes.
@@ -157,6 +166,9 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 
 		// Extract optional parameters.
 		calendarID := request.GetString("calendar_id", "")
+		if target.isShared() && calendarID != "" {
+			return mcp.NewToolResultError("shared owner-primary reads do not accept calendar_id"), nil
+		}
 		if calendarID != "" {
 			if err := validate.ValidateResourceID(calendarID, "calendar_id"); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -225,7 +237,7 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = client.Me().Calendars().ByCalendarId(calendarID).CalendarView().Get(timeoutCtx, cfg)
+				resp, err = target.root.Calendars().ByCalendarId(calendarID).CalendarView().Get(timeoutCtx, cfg)
 				return err
 			})
 		} else {
@@ -253,7 +265,7 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = client.Me().CalendarView().Get(timeoutCtx, cfg)
+				resp, err = target.root.CalendarView().Get(timeoutCtx, cfg)
 				return err
 			})
 		}
@@ -310,6 +322,10 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 				"duration", time.Since(start))
 			return mcp.NewToolResultError(fmt.Sprintf("failed to iterate events: %s", err.Error())), nil
 		}
+		payload, err := addSharedEventReferences(events, target, referenceCodec(codecs), outputMode == "raw")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Return text output when requested.
 		if outputMode == "text" {
@@ -319,7 +335,7 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 			return mcp.NewToolResultText(FormatEventsText(events)), nil
 		}
 
-		jsonBytes, err := json.Marshal(events)
+		jsonBytes, err := json.Marshal(payload)
 		if err != nil {
 			logger.Error("json serialization failed",
 				"error", err.Error(),

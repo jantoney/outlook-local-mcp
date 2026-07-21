@@ -147,6 +147,15 @@ For a mounted calendar, discover recipient-view candidates and have the user sel
 
 For an organizational owner's primary calendar, create an `owner_primary_calendar` with profile `off` or `read`. Owner-primary manage is not supported. Adding a shared scope disconnects the account only when the effective scope union changes; call `account.login` when prompted.
 
+After adding a read-enabled owner-primary alias, list events and retain the returned signed reference for follow-up reads:
+
+```json
+{"tool":"calendar","args":{"operation":"list_events","account":"work","shared_resource":"finance-calendar","date":"this_week","output":"summary"}}
+{"tool":"calendar","args":{"operation":"get_event","account":"work","shared_resource":"finance-calendar","resource_ref":"<returned-resource-ref>"}}
+```
+
+Do not pass a shared event's raw Graph ID to `get_event`; shared follow-ups require the target-bound reference. Omitting `shared_resource` keeps the existing own-calendar workflow.
+
 ## 6. Configure a shared mailbox alias
 
 Shared mailboxes require a validated organizational token context and existing Exchange delegation. Add the immutable owner-view identity first; every action starts disabled:

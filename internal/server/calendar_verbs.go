@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/desek/outlook-local-mcp/internal/audit"
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/observability"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/desek/outlook-local-mcp/internal/tools"
 	"github.com/desek/outlook-local-mcp/internal/tools/help"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -28,6 +30,12 @@ import (
 // calendarVerbsConfig holds the dependencies required to build the calendar
 // domain verb slice. All fields are captured at server start.
 type calendarVerbsConfig struct {
+	// registry supplies the selected account's current target allowlist.
+	registry *auth.AccountRegistry
+
+	// referenceCodec signs and verifies restart-stable item provenance.
+	referenceCodec *resource.ReferenceCodec
+
 	// retryCfg is the Graph API retry configuration applied to all calendar handlers.
 	retryCfg graph.RetryConfig
 
@@ -56,6 +64,9 @@ type calendarVerbsConfig struct {
 	// readOnly controls whether write verbs are blocked by ReadOnlyGuard.
 	readOnly bool
 }
+
+// calendarTargetWrapper applies the common target guard to one read handler.
+type calendarTargetWrapper func(string, string, TargetGuardConfig, mcpserver.ToolHandlerFunc) tools.Handler
 
 // buildCalendarVerbs constructs the ordered []tools.Verb slice for the calendar
 // domain aggregate tool and returns a pointer to an initially empty VerbRegistry.
@@ -87,6 +98,13 @@ func buildCalendarVerbs(c calendarVerbsConfig) ([]tools.Verb, *tools.VerbRegistr
 		return tools.Handler(c.authMW(c.accountResolverMW(observability.WithObservability(name, c.m, c.tracer, audit.AuditWrap(name, auditOp, h)))))
 	}
 
+	// wrapTarget builds the read chain with AuditWrap outside the target guard
+	// so every allowed or denied attempt produces exactly one audit record.
+	wrapTarget := func(name, auditOp string, guard TargetGuardConfig, h mcpserver.ToolHandlerFunc) tools.Handler {
+		guarded := ResolvedTargetGuard(c.registry, guard, c.referenceCodec, h)
+		return tools.Handler(c.authMW(c.accountResolverMW(observability.WithObservability(name, c.m, c.tracer, audit.AuditWrap(name, auditOp, guarded)))))
+	}
+
 	// wrapWrite adds ReadOnlyGuard between observability and audit for write verbs.
 	wrapWrite := func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
 		return tools.Handler(c.authMW(c.accountResolverMW(observability.WithObservability(name, c.m, c.tracer, ReadOnlyGuard(name, c.readOnly, audit.AuditWrap(name, auditOp, h))))))
@@ -99,9 +117,9 @@ func buildCalendarVerbs(c calendarVerbsConfig) ([]tools.Verb, *tools.VerbRegistr
 	return []tools.Verb{
 		help.NewHelpVerb(registryPtr),
 		buildListCalendarsVerb(c, rc, wrap),
-		buildListEventsVerb(c, rc, tz, prov, wrap),
-		buildGetEventVerb(c, rc, tz, prov, wrap),
-		buildSearchEventsVerb(c, rc, tz, prov, wrap),
+		buildListEventsVerb(c, rc, tz, prov, wrapTarget),
+		buildGetEventVerb(c, rc, tz, prov, wrapTarget),
+		buildSearchEventsVerb(c, rc, tz, prov, wrapTarget),
 		buildCreateEventVerb(c, rc, tz, prov, wrapWrite),
 		buildUpdateEventVerb(c, rc, tz, wrapWrite),
 		buildDeleteEventVerb(c, rc, wrapWrite),
@@ -142,18 +160,19 @@ func buildListCalendarsVerb(c calendarVerbsConfig, rc graph.RetryConfig, wrap fu
 }
 
 // buildListEventsVerb constructs the list_events Verb.
-func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
+func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap calendarTargetWrapper) tools.Verb {
 	return tools.Verb{
 		Name:        "list_events",
 		Summary:     "list events in a time window; expands recurring events into occurrences",
-		Description: "Lists calendar events within a time window. Recurring events are expanded into individual occurrences. Use the 'date' shorthand for quick queries ('today', 'tomorrow', 'this_week', 'next_week') or provide explicit ISO 8601 start/end datetimes. Results default to the primary calendar; use calendar_id to scope to a specific calendar.",
+		Description: "Lists calendar events within a time window. Recurring events are expanded into individual occurrences. Omit shared_resource for the signed-in account's /me calendar, or select an approved owner-primary alias. Shared text and summary results include target-bound resource_ref values; raw returns unchanged event data with a provenance sidecar.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"date": "today"}, Comment: "list today's events"},
 			{Args: map[string]any{"date": "this_week", "max_results": 50}, Comment: "list this week's events, up to 50"},
+			{Args: map[string]any{"shared_resource": "finance-calendar", "date": "this_week", "output": "summary"}, Comment: "list an approved owner-primary shared calendar with signed references"},
 			{Args: map[string]any{"start_datetime": "2026-04-28T00:00:00", "end_datetime": "2026-04-29T00:00:00"}, Comment: "list events for a specific day"},
 		},
-		SeeDocs: []string{"concepts#output-tiers"},
-		Handler: wrap("calendar.list_events", "read", tools.NewHandleListEvents(rc, c.timeout, tz, prov)),
+		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-calendar-aliases"},
+		Handler: wrap("calendar.list_events", "read", calendarOwnerReadGuard(), tools.NewHandleListEvents(rc, c.timeout, tz, prov, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -161,6 +180,9 @@ func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov s
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource",
+				mcp.Description("Optional account-scoped owner-primary calendar alias. Omit to preserve own-calendar /me behavior."),
+			),
 			mcp.WithString("date",
 				mcp.Description("Date shorthand: 'today', 'tomorrow', 'this_week', 'next_week', or ISO 8601 date (YYYY-MM-DD). Expands to start/end boundaries in the configured timezone. When start_datetime/end_datetime are also provided, they take precedence."),
 			),
@@ -171,7 +193,7 @@ func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov s
 				mcp.Description("End of the time range in ISO 8601 format (e.g., 2026-03-13T00:00:00Z). Required unless 'date' is provided."),
 			),
 			mcp.WithString("calendar_id",
-				mcp.Description("Optional calendar ID. If omitted, uses the default calendar."),
+				mcp.Description("Optional own-calendar ID. If omitted, uses the default calendar. Rejected with shared_resource."),
 			),
 			mcp.WithNumber("max_results",
 				mcp.Description("Maximum number of events to return (default 25, max 100)."),
@@ -193,16 +215,17 @@ func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov s
 }
 
 // buildGetEventVerb constructs the get_event Verb.
-func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
+func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap calendarTargetWrapper) tools.Verb {
 	return tools.Verb{
 		Name:        "get_event",
 		Summary:     "get full event details by ID; bodyPreview by default, full body via output=raw",
-		Description: "Fetches the full metadata of a single calendar event by its ID. Text and summary output include a bodyPreview (first 255 characters). To read the complete HTML body, use output=raw. Use list_events or search_events to obtain an event ID.",
+		Description: "Fetches one event. Own-calendar calls use event_id. Shared owner-primary calls select shared_resource and must use the target-bound resource_ref returned by list_events or search_events; alias-plus-event_id is rejected. Text and summary include renewed provenance; raw preserves event data beside a provenance sidecar.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"event_id": "<id>", "output": "raw"}, Comment: "fetch full event details including HTML body"},
+			{Args: map[string]any{"shared_resource": "finance-calendar", "resource_ref": "<returned-resource-ref>"}, Comment: "fetch an owner-primary shared event using verified provenance"},
 		},
-		SeeDocs: []string{"concepts#output-tiers"},
-		Handler: wrap("calendar.get_event", "read", tools.NewHandleGetEvent(rc, c.timeout, tz, prov)),
+		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-calendar-aliases", "troubleshooting#shared-calendar-reference-rejected"},
+		Handler: wrap("calendar.get_event", "read", calendarOwnerGetGuard(), tools.NewHandleGetEvent(rc, c.timeout, tz, prov, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -210,9 +233,14 @@ func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov str
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
 		Schema: []mcp.ToolOption{
+			mcp.WithString("shared_resource",
+				mcp.Description("Optional account-scoped owner-primary calendar alias. Requires resource_ref and rejects event_id."),
+			),
 			mcp.WithString("event_id",
-				mcp.Required(),
-				mcp.Description("The unique identifier of the event to retrieve."),
+				mcp.Description("Own-calendar event ID. Required when shared_resource is omitted; rejected for shared reads."),
+			),
+			mcp.WithString("resource_ref",
+				mcp.Description("Signed target-bound event reference. Required with shared_resource; ignored for own-calendar reads."),
 			),
 			mcp.WithString("timezone",
 				mcp.Description("IANA timezone name for returned event times (e.g., America/New_York)."),
@@ -229,8 +257,11 @@ func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov str
 }
 
 // buildSearchEventsVerb constructs the search_events Verb.
-func buildSearchEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
+func buildSearchEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap calendarTargetWrapper) tools.Verb {
 	schema := []mcp.ToolOption{
+		mcp.WithString("shared_resource",
+			mcp.Description("Optional account-scoped owner-primary calendar alias. Omit to preserve own-calendar /me behavior."),
+		),
 		mcp.WithString("query",
 			mcp.Description("Text to search for in event subjects (case-insensitive)."),
 		),
@@ -285,13 +316,14 @@ func buildSearchEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov
 	return tools.Verb{
 		Name:        "search_events",
 		Summary:     "search events by subject, date range, importance, sensitivity, and other filters",
-		Description: "Searches for calendar events matching the given filters. Subject search is case-insensitive and matches any substring. All filters are combined with AND semantics. Results are ordered by start time. Use get_event with the returned event ID to read full details.",
+		Description: "Searches own or approved owner-primary shared calendar events. Subject search is case-insensitive and all filters use AND semantics. Shared text and summary results include target-bound resource_ref values for get_event; raw returns event data with a separate provenance sidecar.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"query": "standup", "date": "this_week"}, Comment: "find this week's standup meetings"},
 			{Args: map[string]any{"query": "review", "importance": "high"}, Comment: "find high-importance review events"},
+			{Args: map[string]any{"shared_resource": "finance-calendar", "query": "review", "output": "summary"}, Comment: "search an approved owner-primary shared calendar"},
 		},
-		SeeDocs: []string{"concepts#output-tiers"},
-		Handler: wrap("calendar.search_events", "read", tools.NewHandleSearchEvents(rc, c.timeout, tz, prov)),
+		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-calendar-aliases"},
+		Handler: wrap("calendar.search_events", "read", calendarOwnerReadGuard(), tools.NewHandleSearchEvents(rc, c.timeout, tz, prov, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),

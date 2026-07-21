@@ -30,6 +30,7 @@ node_modules/
 
 # Docker volume data
 data/
+resource-reference.key
 
 # Environment-specific MCP config (contains local paths)
 .mcp.json

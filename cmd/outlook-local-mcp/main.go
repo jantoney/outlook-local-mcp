@@ -8,6 +8,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -18,6 +19,7 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/logging"
 	"github.com/desek/outlook-local-mcp/internal/observability"
+	"github.com/desek/outlook-local-mcp/internal/resource"
 	internalserver "github.com/desek/outlook-local-mcp/internal/server"
 	"github.com/mark3labs/mcp-go/server"
 	_ "github.com/microsoft/kiota-abstractions-go"
@@ -191,7 +193,13 @@ func main() {
 		InitialBackoff: time.Duration(cfg.RetryBackoffMS) * time.Millisecond,
 		Logger:         slog.Default(),
 	}
-	internalserver.RegisterTools(s, retryCfg, cfg.RequestTimeout, metrics, tracer, cfg.ReadOnly, authMiddleware, registry, cfg, authenticator)
+	referenceKey, err := resource.LoadOrCreateSigningKey(filepath.Join(filepath.Dir(cfg.AccountsPath), "resource-reference.key"))
+	if err != nil {
+		slog.Error("resource reference signing-key initialization failed", "error", err)
+		os.Exit(1)
+	}
+	referenceCodec := resource.NewReferenceCodec(referenceKey)
+	internalserver.RegisterTools(s, retryCfg, cfg.RequestTimeout, metrics, tracer, cfg.ReadOnly, authMiddleware, registry, cfg, authenticator, &referenceCodec)
 	internalserver.RegisterResources(s)
 
 	// Create root context for graceful shutdown.
