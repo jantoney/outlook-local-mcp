@@ -138,7 +138,16 @@ func NewHandleListMailFolders(retryCfg graph.RetryConfig, timeout time.Duration,
 		for _, folder := range folders {
 			results = append(results, serializeMailFolder(folder))
 		}
-		wrapped, err := addSharedMailReferences(results, target, referenceCodec(codecs), resource.ItemKindMailFolder, outputMode == "raw")
+		var wrapped any
+		if request.GetBool("include_refs", false) {
+			reserved, resolveErr := resolveReservedMailFolderIDs(timeoutCtx, target, retryCfg)
+			if resolveErr != nil {
+				return mcp.NewToolResultError(target.graphError(resolveErr)), nil
+			}
+			wrapped, err = addMoveFolderReferences(results, target, referenceCodec(codecs), reserved, outputMode == "raw")
+		} else {
+			wrapped, err = addSharedMailReferences(results, target, referenceCodec(codecs), resource.ItemKindMailFolder, outputMode == "raw")
+		}
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

@@ -345,6 +345,12 @@ Shared `add_attachment` accepts only an allowlisted local file smaller than 3 Mi
 
 **Remedy:** Do not repeat a partial or uncertain upload until you inspect the existing shared draft in Outlook; repeating it can attach a duplicate. For a local denial, obtain a fresh `draft_ref` from the exact shared mailbox, confirm `draft` is enabled, and choose a file under `OUTLOOK_MCP_ATTACHMENT_ROOTS` smaller than 3 MiB. Use the existing own-mail workflow for resumable files through 150 MiB.
 
+## Message move destination is rejected or uncertain {#message-move}
+
+`move_message` rejects raw IDs, cross-target references, and folders classified as reserved or unclassified. Existing folder references from ordinary read mode do not carry move classification. A timeout, connection loss, or 5xx after dispatch is reported as uncertain because Graph may already have created the destination copy and removed the source.
+
+**Remedy:** Obtain a fresh `message_ref` from `list_messages` or `search_messages` and a classified `destination_folder_ref` from `list_folders`, using `include_refs=true` for own mail. Choose a folder marked `ordinary`. For an uncertain result, do not repeat immediately; inspect both source and destination folders and continue with the destination message's new reference if the move completed.
+
 ---
 
 ## In-server documentation access

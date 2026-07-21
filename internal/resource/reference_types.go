@@ -47,6 +47,18 @@ const (
 // signed reference.
 type ItemKind string
 
+// MailFolderClass records the authorization-relevant destination class that
+// was resolved before a folder reference was signed.
+type MailFolderClass string
+
+const (
+	// MailFolderClassOrdinary permits a caller-selected filing destination.
+	MailFolderClassOrdinary MailFolderClass = "ordinary"
+	// MailFolderClassReserved identifies a system or semantic destination that
+	// requires another exact capability such as archive or trash.
+	MailFolderClassReserved MailFolderClass = "reserved"
+)
+
 const (
 	// ItemKindCalendar identifies a calendar container.
 	ItemKindCalendar ItemKind = "calendar"
@@ -91,6 +103,9 @@ type ReferenceClaims struct {
 	// GraphIDChain is the ordered Graph identifier chain needed to address the
 	// item, ending with ItemKind.
 	GraphIDChain []GraphID `json:"graph_id_chain"`
+	// MailFolderClass is populated only for destination folder references that
+	// were resolved against the mailbox's well-known reserved folders.
+	MailFolderClass MailFolderClass `json:"mail_folder_class,omitempty"`
 }
 
 // validate checks that claims contain a complete, internally consistent
@@ -111,6 +126,12 @@ func (c ReferenceClaims) validate() error {
 	}
 	if len(c.GraphIDChain) == 0 {
 		return fmt.Errorf("Graph ID chain must not be empty")
+	}
+	if c.ItemKind != ItemKindMailFolder && c.MailFolderClass != "" {
+		return fmt.Errorf("mail folder class is valid only for folder references")
+	}
+	if c.MailFolderClass != "" && c.MailFolderClass != MailFolderClassOrdinary && c.MailFolderClass != MailFolderClassReserved {
+		return fmt.Errorf("invalid mail folder class %q", c.MailFolderClass)
 	}
 	for index, graphID := range c.GraphIDChain {
 		if !validItemKind(graphID.Kind) || strings.TrimSpace(graphID.ID) == "" {

@@ -126,6 +126,7 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildUpdateDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildDeleteDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildAddAttachmentVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
+		buildMoveMessageVerb(c, rc, wrapTargetWrite(mailMoveMessageGuard())),
 		buildSendDraftVerb(c, rc, wrapWrite),
 	}
 	for index := range verbs {
@@ -147,8 +148,31 @@ func requiredMailCapability(name string) auth.MailCapability {
 	case "mail.create_draft", "mail.create_reply_draft", "mail.create_forward_draft",
 		"mail.update_draft", "mail.delete_draft", "mail.add_attachment":
 		return auth.MailCapabilityDraft
+	case "mail.move_message":
+		return auth.MailCapabilityMove
 	default:
 		return auth.MailCapabilityRead
+	}
+}
+
+// buildMoveMessageVerb constructs the exact-capability ordinary filing verb.
+func buildMoveMessageVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
+	return tools.Verb{
+		Name:        "move_message",
+		Summary:     "move a referenced message to a referenced ordinary folder",
+		Description: "Moves one referenced own or shared-mail message to a same-target folder reference that was authoritatively classified as ordinary. Archive, Deleted Items, Drafts, Outbox, recoverable-items, and every reserved or unclassified destination are rejected locally. Returns the destination message's new reference because Graph move can change IDs.",
+		SeeDocs:     []string{"concepts#mail-filing-and-recovery"},
+		Handler:     wrapWrite("mail.move_message", "write", tools.NewHandleMoveMessage(rc, c.timeout, c.referenceCodec)),
+		Annotations: []mcp.ToolOption{
+			mcp.WithReadOnlyHintAnnotation(false), mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(false), mcp.WithOpenWorldHintAnnotation(true),
+		},
+		Schema: []mcp.ToolOption{
+			mcp.WithString("message_ref", mcp.Required(), mcp.Description("Target-bound source message reference.")),
+			mcp.WithString("destination_folder_ref", mcp.Required(), mcp.Description("Same-target folder reference classified for ordinary filing.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
+			mcp.WithString("account", mcp.Description("Account label or UPN to use.")),
+		},
 	}
 }
 
@@ -202,7 +226,7 @@ func buildListFoldersVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(str
 	return tools.Verb{
 		Name:        "list_folders",
 		Summary:     "list mail folders (Inbox, Sent, Drafts, etc.) with unread and total counts",
-		Description: "Returns mail folders with display name, unread count, total count, and target-bound folder references for organizational shared mailboxes. shared_resource selects only the configured owner view; use folder_ref with shared list_messages. Requires the exact target-local read capability.",
+		Description: "Returns mail folders with counts and shared read references. Set include_refs=true to resolve well-known reserved folders and emit signed ordinary/reserved destination classification for move_message on either own or shared mail. Existing own output is unchanged by default.",
 		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#shared-mail-aliases"},
 		Handler:     wrap("mail.list_folders", "read", tools.NewHandleListMailFolders(rc, c.timeout, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
@@ -213,6 +237,7 @@ func buildListFoldersVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(str
 		},
 		Schema: []mcp.ToolOption{
 			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability.")),
+			mcp.WithBoolean("include_refs", mcp.Description("Emit target-bound destination references and authoritative ordinary/reserved classification for move_message.")),
 			mcp.WithString("account",
 				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
 			),
@@ -233,7 +258,7 @@ func buildListMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(st
 	return tools.Verb{
 		Name:        "list_messages",
 		Summary:     "list messages in a folder or across all folders; filter by date, sender, thread",
-		Description: "Lists messages in an own or organizational shared mailbox, optionally within a folder. shared_resource selects only the configured owner view; shared folder selection requires folder_ref from list_folders and rejects raw folder_id. Shared text and summary results include target-bound message references; raw preserves Graph-derived data beside provenance. Results include bodyPreview; use get_message with output=raw for full HTML.",
+		Description: "Lists messages in an own or organizational shared mailbox. Shared results include references; set include_refs=true to opt into the same signed references for own-mail move_message without changing default own output. Raw keeps provenance in a sidecar. Results include bodyPreview; full body requires get_message output=raw.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"folder_id": "Inbox", "is_read": false}, Comment: "list unread messages in inbox"},
 			{Args: map[string]any{"from": "alice@contoso.com", "max_results": 10}, Comment: "list recent messages from a sender"},
@@ -248,6 +273,7 @@ func buildListMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(st
 		},
 		Schema: []mcp.ToolOption{
 			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability.")),
+			mcp.WithBoolean("include_refs", mcp.Description("Emit target-bound message references for own-mail move_message; shared reads already include them.")),
 			mcp.WithString("folder_id",
 				mcp.Description("Own-mail folder ID. Rejected with shared_resource; use folder_ref."),
 			),
@@ -339,7 +365,7 @@ func buildSearchMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(
 	return tools.Verb{
 		Name:        "search_messages",
 		Summary:     "full-text KQL search across messages; ranked by relevance, not chronologically",
-		Description: "Searches own or organizational shared-mail messages using KQL. shared_resource selects only the configured owner view; shared folder scoping requires folder_ref and rejects raw folder_id. Shared text and summary results include target-bound message references; raw preserves Graph-derived data beside provenance. Results are ranked by relevance and include bodyPreview; full body requires get_message output=raw.",
+		Description: "Searches own or organizational shared mail using KQL. Shared results include references; set include_refs=true to opt into own-mail references for move_message. Raw keeps provenance in a sidecar. Results are relevance-ranked and include bodyPreview; full body requires get_message output=raw.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"query": "subject:\"quarterly review\""}, Comment: "find messages with a specific subject"},
 			{Args: map[string]any{"query": "from:alice@contoso.com hasAttachments:true"}, Comment: "find messages with attachments from a sender"},
@@ -354,6 +380,7 @@ func buildSearchMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(
 		},
 		Schema: []mcp.ToolOption{
 			mcp.WithString("shared_resource", mcp.Description("Optional organizational shared-mail alias with read capability.")),
+			mcp.WithBoolean("include_refs", mcp.Description("Emit target-bound message references for own-mail move_message; shared reads already include them.")),
 			mcp.WithString("query",
 				mcp.Required(),
 				mcp.Description("KQL search string (e.g. subject:\"Design Review\" from:alice@contoso.com)."),

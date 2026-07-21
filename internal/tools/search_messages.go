@@ -291,7 +291,8 @@ func NewHandleSearchMessages(retryCfg graph.RetryConfig, timeout time.Duration, 
 				"duration", time.Since(start))
 			return mcp.NewToolResultError(fmt.Sprintf("failed to iterate messages: %s", err.Error())), nil
 		}
-		wrapped, err := addSharedMailReferences(messages, target, referenceCodec(codecs), resource.ItemKindMessage, outputMode == "raw")
+		includeRefs := target.isShared() || request.GetBool("include_refs", false)
+		wrapped, err := addMailReferences(messages, target, referenceCodec(codecs), resource.ItemKindMessage, outputMode == "raw", includeRefs)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

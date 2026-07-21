@@ -170,6 +170,59 @@ func TestSharedDraftGuardsFailBeforeHandler(t *testing.T) {
 	}
 }
 
+// TestMoveMessageGuardRequiresEnabledTargetBoundSource verifies move requests
+// cannot reach a handler with a disabled policy, a raw ID, or cross-target
+// source provenance.
+func TestMoveMessageGuardRequiresEnabledTargetBoundSource(t *testing.T) {
+	var handlerCalls atomic.Int32
+	client, server := newServerTestGraphClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	inner := mcpserver.ToolHandlerFunc(func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handlerCalls.Add(1)
+		return mcp.NewToolResultText("unexpected"), nil
+	})
+	registry, entry, codec := sharedMailGuardFixture(t, client, auth.TokenTenantOrganizational)
+
+	for _, args := range []map[string]any{
+		{"shared_resource": "finance-mail", "message_id": "message-1"},
+		{"shared_resource": "finance-mail"},
+	} {
+		result, err := ResolvedTargetGuard(registry, mailMoveMessageGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(args))
+		if err != nil || !result.IsError {
+			t.Fatalf("disabled/raw-ID result = %+v, error = %v", result, err)
+		}
+	}
+
+	entry.MailAliases[0].Policy.Move = true
+	other, err := resource.NewMailAlias(resource.ResourceID("44444444-4444-4444-8444-444444444444"), "other-mail", "other@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Policy.Move = true
+	entry.MailAliases = append(entry.MailAliases, other)
+	otherTarget, err := resource.TargetFromMailAlias(entry.AccountID, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := codec.Sign(resource.ReferenceClaims{
+		AccountID: otherTarget.AccountID, ResourceID: otherTarget.ResourceID, ResourceKind: otherTarget.Kind,
+		MailboxView: otherTarget.View, ItemKind: resource.ItemKindMessage,
+		GraphIDChain: []resource.GraphID{{Kind: resource.ItemKindMessage, ID: "message-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ResolvedTargetGuard(registry, mailMoveMessageGuard(), &codec, inner)(ownerGuardAccountContext(entry), requestWithArguments(map[string]any{
+		"shared_resource": "finance-mail", "message_ref": reference,
+	}))
+	if err != nil || !result.IsError {
+		t.Fatalf("cross-target result = %+v, error = %v", result, err)
+	}
+	if handlerCalls.Load() != 0 {
+		t.Fatalf("handler calls = %d, want zero", handlerCalls.Load())
+	}
+}
+
 // sharedMailGuardFixture creates one organizational mailbox alias and signer.
 func sharedMailGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient, tenant auth.TokenTenantContext) (*auth.AccountRegistry, *auth.AccountEntry, resource.ReferenceCodec) {
 	t.Helper()

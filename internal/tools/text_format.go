@@ -624,6 +624,9 @@ func FormatMailFoldersText(folders []map[string]any) string {
 		unread := toInt(f["unreadItemCount"])
 		total := toInt(f["totalItemCount"])
 		fmt.Fprintf(&b, "%d. %s (%d unread, %d total)\n", i+1, name, unread, total)
+		if class, _ := f["destination_class"].(string); class != "" {
+			fmt.Fprintf(&b, "   Destination Class: %s\n", class)
+		}
 		if reference, _ := f["resource_ref"].(string); reference != "" {
 			fmt.Fprintf(&b, "   Resource Ref: %s\n", reference)
 		}

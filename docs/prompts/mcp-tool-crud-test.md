@@ -643,6 +643,10 @@ If an operator supplied a safe file below 3 MiB under `OUTLOOK_MCP_ATTACHMENT_RO
 
 For denial coverage, try each shared draft verb with `draft` disabled, pass a raw `message_id` beside `shared_resource`, pass a draft reference from another alias or mailbox view, and revoke the alias policy between the `isDraft` preflight and update/delete or attachment mutation. **Verify:** every denied call stops locally or after the preflight GET with no mutation. If draft creation or attachment upload reports `PARTIAL SUCCESS`, record the returned recovery identifiers and do not repeat the mutation until the existing draft is inspected.
 
+### Ordinary message move
+
+For own and organizational shared mail, obtain a source `message_ref` from `list_messages` or `search_messages` and a destination from `list_folders`; set `include_refs=true` for own discovery. Choose a destination classified `ordinary`, call `move_message`, and record the returned new message reference. **Verify:** the destination is resolved before one `/messages/{source}/move` request on the exact target route, the result does not present the source reference as current, and the new reference works on that target. Try Archive, Deleted Items, Drafts, Outbox, a cross-target folder reference, and an unclassified folder reference. **Verify:** each is rejected before the move mutation and cannot bypass its separate action gate.
+
 ### Step 36 -- Get attachment
 
 Using `{tool: "mail", args: {operation: "list_messages", folder: "Inbox", has_attachments: true, top: 1}}` pick a message that has attachments. If none found, skip Step 36.

@@ -9,7 +9,13 @@ import (
 // addSharedMailReferences adds direct text/summary provenance or a raw
 // position-aligned sidecar without changing Graph-derived data maps.
 func addSharedMailReferences(items []map[string]any, target mailReadTarget, codec *resource.ReferenceCodec, kind resource.ItemKind, raw bool) (any, error) {
-	if !target.isShared() {
+	return addMailReferences(items, target, codec, kind, raw, target.isShared())
+}
+
+// addMailReferences signs target-bound item references when enabled. It lets
+// existing own reads opt in without changing their default output shapes.
+func addMailReferences(items []map[string]any, target mailReadTarget, codec *resource.ReferenceCodec, kind resource.ItemKind, raw, enabled bool) (any, error) {
+	if !enabled {
 		return items, nil
 	}
 	if codec == nil {

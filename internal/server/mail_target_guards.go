@@ -72,3 +72,13 @@ func mailSharedDraftItemGuard() TargetGuardConfig {
 	config.ItemKind = resource.ItemKindDraft
 	return config
 }
+
+// mailMoveMessageGuard requires the exact move capability and a source
+// message reference for both own and shared mailbox targets.
+func mailMoveMessageGuard() TargetGuardConfig {
+	return TargetGuardConfig{
+		Family: resource.TargetFamilyMail, Capability: resource.TargetCapability(resource.MailCapabilityMove),
+		AllowedKinds:      []resource.ResourceKind{resource.ResourceKindOwnMailbox, resource.ResourceKindMailbox},
+		ReferenceArgument: "message_ref", RequireReference: true, ItemKind: resource.ItemKindMessage,
+	}
+}

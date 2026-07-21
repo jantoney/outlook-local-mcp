@@ -71,6 +71,15 @@ func (target mailReadTarget) messageID(requestID string) (string, error) {
 	return target.claims.GraphIDChain[0].ID, nil
 }
 
+// referencedMessageID returns a verified message ID for new operations whose
+// contract requires references for both own and shared targets.
+func (target mailReadTarget) referencedMessageID() (string, error) {
+	if target.claims == nil || target.claims.ItemKind != resource.ItemKindMessage || len(target.claims.GraphIDChain) != 1 {
+		return "", fmt.Errorf("operation requires a verified message_ref for the resolved mailbox")
+	}
+	return target.claims.GraphIDChain[0].ID, nil
+}
+
 // draftID returns an own raw draft ID or the verified shared draft ID.
 func (target mailReadTarget) draftID(requestID string) (string, error) {
 	if !target.isShared() {
