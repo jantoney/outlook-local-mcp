@@ -145,6 +145,8 @@ For a mounted calendar, discover recipient-view candidates and have the user sel
 {"tool":"account","args":{"operation":"add_calendar_alias","label":"work","alias":"finance-calendar","owner":"owner@contoso.com","kind":"mounted_calendar","profile":"read","mounted_calendar_id":"<selected-id>","confirm_mounted_selection":true}}
 ```
 
+Mounted list, search, and referenced get calls use that exact selected ID beneath `/me/calendars`; the server never builds the route from the configured owner. Unknown token tenant context is rejected until validated personal or organizational evidence is available.
+
 For an organizational owner's primary calendar, create an `owner_primary_calendar` with profile `off` or `read`. Owner-primary manage is not supported. Adding a shared scope disconnects the account only when the effective scope union changes; call `account.login` when prompted.
 
 After adding a read-enabled owner-primary alias, list events and retain the returned signed reference for follow-up reads:

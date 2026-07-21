@@ -146,14 +146,17 @@ func (a CalendarAlias) ReselectMounted(mountedID string) (CalendarAlias, error) 
 
 // ValidateCalendarCompatibility enforces token-context restrictions before
 // Graph traffic. Owner-view primary calendars require an organizational token;
-// mounted manage also requires organizational context. Mounted read and off
-// remain compatible with personal, organizational, or unknown contexts.
+// mounted manage also requires organizational context. Mounted read supports
+// validated personal and organizational contexts, while unknown fails closed.
 func ValidateCalendarCompatibility(alias CalendarAlias, tokenTenantContext string) error {
 	if err := alias.Validate(); err != nil {
 		return err
 	}
 	if alias.Kind == CalendarKindOwnerPrimary && tokenTenantContext != "organizational" {
 		return fmt.Errorf("owner-primary calendar aliases require an organizational token context")
+	}
+	if alias.Profile == CalendarProfileRead && tokenTenantContext != "personal" && tokenTenantContext != "organizational" {
+		return fmt.Errorf("shared calendar read requires a validated personal or organizational token context")
 	}
 	if alias.Profile == CalendarProfileManage && tokenTenantContext != "organizational" {
 		return fmt.Errorf("shared calendar manage requires an organizational token context")

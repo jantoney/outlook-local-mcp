@@ -57,8 +57,45 @@ func (target calendarReadTarget) eventID(requestID string) (string, error) {
 	return target.claims.GraphIDChain[0].ID, nil
 }
 
-// supportsOwnerRead reports whether this issue's read surface supports target.
-// Mounted-calendar reads are enabled separately by issue #9.
-func (target calendarReadTarget) supportsOwnerRead() bool {
-	return !target.isShared() || target.target.Kind == resource.ResourceKindOwnerPrimaryCalendar
+// supportsSharedRead reports whether the calendar read surface supports target.
+func (target calendarReadTarget) supportsSharedRead() bool {
+	return !target.isShared() || target.target.Kind == resource.ResourceKindOwnerPrimaryCalendar || target.isMounted()
+}
+
+// isMounted reports whether the shared target is one selected recipient-view
+// calendar whose configured ID must be applied beneath the /me user root.
+func (target calendarReadTarget) isMounted() bool {
+	return target.target.Kind == resource.ResourceKindMountedCalendar
+}
+
+// graphError returns an actionable mounted-calendar recovery error without
+// changing the route or attempting owner/default fallbacks.
+func (target calendarReadTarget) graphError(err error) string {
+	redacted := graph.RedactGraphError(err)
+	if !target.isMounted() {
+		return redacted
+	}
+	return fmt.Sprintf("mounted calendar request failed; use account.reselect_calendar_alias after fresh discovery: %s", redacted)
+}
+
+// calendarViewEndpoint returns a route-template label safe for diagnostics.
+func (target calendarReadTarget) calendarViewEndpoint() string {
+	if target.isMounted() {
+		return "GET /me/calendars/{mounted-id}/calendarView"
+	}
+	if target.target.View == resource.MailboxViewOwner {
+		return "GET /users/{owner}/calendarView"
+	}
+	return "GET /me/calendarView"
+}
+
+// eventEndpoint returns a route-template label safe for diagnostics.
+func (target calendarReadTarget) eventEndpoint() string {
+	if target.isMounted() {
+		return "GET /me/calendars/{mounted-id}/events/{event-id}"
+	}
+	if target.target.View == resource.MailboxViewOwner {
+		return "GET /users/{owner}/events/{event-id}"
+	}
+	return "GET /me/events/{event-id}"
 }

@@ -57,6 +57,18 @@ func TestValidateCalendarCompatibility(t *testing.T) {
 	if err := ValidateCalendarCompatibility(mounted, "organizational"); err != nil {
 		t.Fatalf("organizational mounted manage compatibility error = %v", err)
 	}
+	mountedRead, err := mounted.WithProfile(CalendarProfileRead)
+	if err != nil {
+		t.Fatalf("WithProfile(read) error = %v", err)
+	}
+	for _, context := range []string{"personal", "organizational"} {
+		if err := ValidateCalendarCompatibility(mountedRead, context); err != nil {
+			t.Fatalf("%s mounted read compatibility error = %v", context, err)
+		}
+	}
+	if err := ValidateCalendarCompatibility(mountedRead, "unknown"); err == nil {
+		t.Fatal("unknown mounted read compatibility succeeded")
+	}
 }
 
 // TestCalendarAliasRejectsInvalidCombinations verifies kind/view/profile

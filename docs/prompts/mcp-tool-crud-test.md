@@ -542,6 +542,9 @@ To verify AC-5 manually:
 11. Call `calendar.search_events` with the same alias and verify matching results also carry references. Use one returned reference with `calendar.get_event`, the same account, and the same alias. **Pass:** the event is returned without supplying `event_id`.
 12. Retry shared `get_event` with a tampered reference and with `event_id` plus the alias. Remove the alias and retry the original valid reference. **Pass:** every call is rejected locally and no Graph request occurs. Recreate only if needed for later manual testing; a recreated alias must not revive the old reference.
 13. If no genuinely delegated owner-primary calendar is available, record shared owner read as **SKIP**; do not invent an owner or weaken the negative checks.
+14. If a genuinely shared mounted calendar is available, call `calendar.list_events` and `calendar.search_events` with its alias. **Verify:** the calls succeed for validated personal or organizational accounts, return mounted-view references, and use the selected `/me/calendars/{mounted-id}` route. Unknown tenant context must fail locally.
+15. Use a mounted event reference with `calendar.get_event`. Then try references from an own event, owner-primary alias, and a different mounted alias. **Pass:** only the exact mounted target succeeds; every cross-view or cross-resource reference fails before Graph.
+16. If the configured mounted ID is no longer returned, call one mounted read. **Pass:** the response directs the operator to fresh discovery and `account.reselect_calendar_alias`, and no owner/default/matching-name fallback request occurs.
 
 ### Step 29e -- Shared-mail alias lifecycle and action policy
 

@@ -120,7 +120,7 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if !target.supportsOwnerRead() {
+		if !target.supportsSharedRead() {
 			return mcp.NewToolResultError("calendar target kind is not enabled for this read surface"), nil
 		}
 
@@ -210,8 +210,16 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 		if provenancePropertyID != "" {
 			expandFields = []string{graph.ProvenanceExpandFilter(provenancePropertyID)}
 		}
+		routeCalendarID := calendarID
+		if target.isMounted() {
+			routeCalendarID = target.target.MountedCalendarID
+		}
+		routeEndpoint := target.calendarViewEndpoint()
+		if routeCalendarID != "" && !target.isMounted() {
+			routeEndpoint = "GET /me/calendars/{id}/calendarView"
+		}
 
-		if calendarID != "" {
+		if routeCalendarID != "" {
 			// Route to specific calendar's CalendarView.
 			qp := &users.ItemCalendarsItemCalendarViewRequestBuilderGetQueryParameters{
 				StartDateTime: &startDatetime,
@@ -230,14 +238,14 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 				cfg.Headers = headers
 			}
 			logger.Debug("graph API request",
-				"endpoint", "GET /me/calendars/{id}/calendarView",
-				"calendar_id", calendarID,
+				"endpoint", routeEndpoint,
+				"calendar_id", routeCalendarID,
 				"start_datetime", startDatetime,
 				"end_datetime", endDatetime,
 				"top", top)
 			graphErr = graph.RetryGraphCall(ctx, retryCfg, func() error {
 				var err error
-				resp, err = target.root.Calendars().ByCalendarId(calendarID).CalendarView().Get(timeoutCtx, cfg)
+				resp, err = target.root.Calendars().ByCalendarId(routeCalendarID).CalendarView().Get(timeoutCtx, cfg)
 				return err
 			})
 		} else {
@@ -259,7 +267,7 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 				cfg.Headers = headers
 			}
 			logger.Debug("graph API request",
-				"endpoint", "GET /me/calendarView",
+				"endpoint", routeEndpoint,
 				"start_datetime", startDatetime,
 				"end_datetime", endDatetime,
 				"top", top)
@@ -279,11 +287,11 @@ func NewHandleListEvents(retryCfg graph.RetryConfig, timeout time.Duration, defa
 			logger.Error("graph API call failed",
 				"error", graph.FormatGraphError(graphErr),
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(graphErr)), nil
+			return mcp.NewToolResultError(target.graphError(graphErr)), nil
 		}
 
 		logger.Debug("graph API response",
-			"endpoint", "GET /me/calendarView",
+			"endpoint", routeEndpoint,
 			"status", "ok")
 
 		// Paginate through results using PageIterator with max_results cap.

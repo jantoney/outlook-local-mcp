@@ -82,7 +82,7 @@ func TestOwnerCalendarGetGuardRejectsInvalidProvenanceBeforeGraph(t *testing.T) 
 			if test.rawEvent {
 				request.Params.Arguments.(map[string]any)["event_id"] = "event-1"
 			}
-			guarded := ResolvedTargetGuard(registry, calendarOwnerGetGuard(), &codec, inner)
+			guarded := ResolvedTargetGuard(registry, calendarSharedGetGuard(), &codec, inner)
 			result, err := guarded(ownerGuardAccountContext(entry), request)
 			if err != nil || !result.IsError {
 				t.Fatalf("guard result = %+v, error = %v", result, err)

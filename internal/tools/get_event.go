@@ -101,7 +101,7 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		if err != nil {
 			return mcp.NewToolResultError("no account selected"), nil
 		}
-		if !target.supportsOwnerRead() {
+		if !target.supportsSharedRead() {
 			return mcp.NewToolResultError("calendar target kind is not enabled for this read surface"), nil
 		}
 
@@ -144,8 +144,14 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		if provenancePropertyID != "" {
 			expandFields = []string{graph.ProvenanceExpandFilter(provenancePropertyID)}
 		}
-		cfg := &users.ItemEventsEventItemRequestBuilderGetRequestConfiguration{
+		rootCfg := &users.ItemEventsEventItemRequestBuilderGetRequestConfiguration{
 			QueryParameters: &users.ItemEventsEventItemRequestBuilderGetQueryParameters{
+				Select: getEventSelectFields,
+				Expand: expandFields,
+			},
+		}
+		mountedCfg := &users.ItemCalendarsItemEventsEventItemRequestBuilderGetRequestConfiguration{
+			QueryParameters: &users.ItemCalendarsItemEventsEventItemRequestBuilderGetQueryParameters{
 				Select: getEventSelectFields,
 				Expand: expandFields,
 			},
@@ -153,20 +159,25 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 		if timezone != "" {
 			headers := abstractions.NewRequestHeaders()
 			headers.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
-			cfg.Headers = headers
+			rootCfg.Headers = headers
+			mountedCfg.Headers = headers
 		}
 
 		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		logger.Debug("graph API request",
-			"endpoint", "GET /me/events/{id}",
+			"endpoint", target.eventEndpoint(),
 			"event_id", eventID)
 
 		var event models.Eventable
 		err = graph.RetryGraphCall(ctx, retryCfg, func() error {
 			var graphErr error
-			event, graphErr = target.root.Events().ByEventId(eventID).Get(timeoutCtx, cfg)
+			if target.isMounted() {
+				event, graphErr = target.root.Calendars().ByCalendarId(target.target.MountedCalendarID).Events().ByEventId(eventID).Get(timeoutCtx, mountedCfg)
+			} else {
+				event, graphErr = target.root.Events().ByEventId(eventID).Get(timeoutCtx, rootCfg)
+			}
 			return graphErr
 		})
 		if err != nil {
@@ -180,11 +191,11 @@ func NewHandleGetEvent(retryCfg graph.RetryConfig, timeout time.Duration, defaul
 				"error", graph.FormatGraphError(err),
 				"event_id", eventID,
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		logger.Debug("graph API response",
-			"endpoint", "GET /me/events/{id}",
+			"endpoint", target.eventEndpoint(),
 			"event_id", eventID,
 			"subject", graph.SafeStr(event.GetSubject()))
 

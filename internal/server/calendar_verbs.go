@@ -164,15 +164,16 @@ func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov s
 	return tools.Verb{
 		Name:        "list_events",
 		Summary:     "list events in a time window; expands recurring events into occurrences",
-		Description: "Lists calendar events within a time window. Recurring events are expanded into individual occurrences. Omit shared_resource for the signed-in account's /me calendar, or select an approved owner-primary alias. Shared text and summary results include target-bound resource_ref values; raw returns unchanged event data with a provenance sidecar.",
+		Description: "Lists calendar events within a time window. Omit shared_resource for the signed-in account's /me calendar, select an approved owner-primary alias for /users/{owner}/calendarView, or select a mounted alias for its exact /me/calendars/{mounted-id}/calendarView. Shared text and summary results include target-bound resource_ref values; raw returns event data with a provenance sidecar.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"date": "today"}, Comment: "list today's events"},
 			{Args: map[string]any{"date": "this_week", "max_results": 50}, Comment: "list this week's events, up to 50"},
 			{Args: map[string]any{"shared_resource": "finance-calendar", "date": "this_week", "output": "summary"}, Comment: "list an approved owner-primary shared calendar with signed references"},
+			{Args: map[string]any{"shared_resource": "team-mount", "date": "today"}, Comment: "list an explicitly selected mounted calendar in recipient view"},
 			{Args: map[string]any{"start_datetime": "2026-04-28T00:00:00", "end_datetime": "2026-04-29T00:00:00"}, Comment: "list events for a specific day"},
 		},
 		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-calendar-aliases"},
-		Handler: wrap("calendar.list_events", "read", calendarOwnerReadGuard(), tools.NewHandleListEvents(rc, c.timeout, tz, prov, c.referenceCodec)),
+		Handler: wrap("calendar.list_events", "read", calendarSharedReadGuard(), tools.NewHandleListEvents(rc, c.timeout, tz, prov, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -181,7 +182,7 @@ func buildListEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov s
 		},
 		Schema: []mcp.ToolOption{
 			mcp.WithString("shared_resource",
-				mcp.Description("Optional account-scoped owner-primary calendar alias. Omit to preserve own-calendar /me behavior."),
+				mcp.Description("Optional account-scoped owner-primary or mounted calendar alias. Omit to preserve own-calendar /me behavior."),
 			),
 			mcp.WithString("date",
 				mcp.Description("Date shorthand: 'today', 'tomorrow', 'this_week', 'next_week', or ISO 8601 date (YYYY-MM-DD). Expands to start/end boundaries in the configured timezone. When start_datetime/end_datetime are also provided, they take precedence."),
@@ -219,13 +220,13 @@ func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov str
 	return tools.Verb{
 		Name:        "get_event",
 		Summary:     "get full event details by ID; bodyPreview by default, full body via output=raw",
-		Description: "Fetches one event. Own-calendar calls use event_id. Shared owner-primary calls select shared_resource and must use the target-bound resource_ref returned by list_events or search_events; alias-plus-event_id is rejected. Text and summary include renewed provenance; raw preserves event data beside a provenance sidecar.",
+		Description: "Fetches one event. Own-calendar calls use event_id. Shared owner-primary and mounted calls select shared_resource and must use the target-bound resource_ref returned by list_events or search_events; alias-plus-event_id is rejected. Mounted calls apply only the alias's selected recipient-view calendar ID. Text and summary include renewed provenance; raw preserves event data beside a provenance sidecar.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"event_id": "<id>", "output": "raw"}, Comment: "fetch full event details including HTML body"},
 			{Args: map[string]any{"shared_resource": "finance-calendar", "resource_ref": "<returned-resource-ref>"}, Comment: "fetch an owner-primary shared event using verified provenance"},
 		},
 		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-calendar-aliases", "troubleshooting#shared-calendar-reference-rejected"},
-		Handler: wrap("calendar.get_event", "read", calendarOwnerGetGuard(), tools.NewHandleGetEvent(rc, c.timeout, tz, prov, c.referenceCodec)),
+		Handler: wrap("calendar.get_event", "read", calendarSharedGetGuard(), tools.NewHandleGetEvent(rc, c.timeout, tz, prov, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -234,7 +235,7 @@ func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov str
 		},
 		Schema: []mcp.ToolOption{
 			mcp.WithString("shared_resource",
-				mcp.Description("Optional account-scoped owner-primary calendar alias. Requires resource_ref and rejects event_id."),
+				mcp.Description("Optional account-scoped owner-primary or mounted calendar alias. Requires resource_ref and rejects event_id."),
 			),
 			mcp.WithString("event_id",
 				mcp.Description("Own-calendar event ID. Required when shared_resource is omitted; rejected for shared reads."),
@@ -260,7 +261,7 @@ func buildGetEventVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov str
 func buildSearchEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov string, wrap calendarTargetWrapper) tools.Verb {
 	schema := []mcp.ToolOption{
 		mcp.WithString("shared_resource",
-			mcp.Description("Optional account-scoped owner-primary calendar alias. Omit to preserve own-calendar /me behavior."),
+			mcp.Description("Optional account-scoped owner-primary or mounted calendar alias. Omit to preserve own-calendar /me behavior."),
 		),
 		mcp.WithString("query",
 			mcp.Description("Text to search for in event subjects (case-insensitive)."),
@@ -316,14 +317,14 @@ func buildSearchEventsVerb(c calendarVerbsConfig, rc graph.RetryConfig, tz, prov
 	return tools.Verb{
 		Name:        "search_events",
 		Summary:     "search events by subject, date range, importance, sensitivity, and other filters",
-		Description: "Searches own or approved owner-primary shared calendar events. Subject search is case-insensitive and all filters use AND semantics. Shared text and summary results include target-bound resource_ref values for get_event; raw returns event data with a separate provenance sidecar.",
+		Description: "Searches own, approved owner-primary, or explicitly selected mounted calendar events. Mounted searches stay under /me/calendars/{mounted-id}/calendarView and never derive a route from owner text. Shared text and summary results include target-bound resource_ref values for get_event; raw returns event data with a separate provenance sidecar.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"query": "standup", "date": "this_week"}, Comment: "find this week's standup meetings"},
 			{Args: map[string]any{"query": "review", "importance": "high"}, Comment: "find high-importance review events"},
 			{Args: map[string]any{"shared_resource": "finance-calendar", "query": "review", "output": "summary"}, Comment: "search an approved owner-primary shared calendar"},
 		},
 		SeeDocs: []string{"concepts#output-tiers", "concepts#shared-calendar-aliases"},
-		Handler: wrap("calendar.search_events", "read", calendarOwnerReadGuard(), tools.NewHandleSearchEvents(rc, c.timeout, tz, prov, c.referenceCodec)),
+		Handler: wrap("calendar.search_events", "read", calendarSharedReadGuard(), tools.NewHandleSearchEvents(rc, c.timeout, tz, prov, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),

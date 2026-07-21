@@ -161,7 +161,7 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if !target.supportsOwnerRead() {
+		if !target.supportsSharedRead() {
 			return mcp.NewToolResultError("calendar target kind is not enabled for this read surface"), nil
 		}
 
@@ -330,7 +330,7 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 		// that events beyond the first page are scanned when needed.
 		clientFilter := buildClientFilter(query, categories)
 
-		events, err := executeSearchCalendarView(timeoutCtx, client, target.root, retryCfg, startDatetime, endDatetime, filterStr, timezone, maxResults, expandFilter, serializeFn, clientFilter)
+		events, err := executeSearchCalendarView(timeoutCtx, client, target, retryCfg, startDatetime, endDatetime, filterStr, timezone, maxResults, expandFilter, serializeFn, clientFilter)
 		if err != nil {
 			if graph.IsTimeoutError(err) {
 				logger.ErrorContext(ctx, "request timed out",
@@ -341,7 +341,7 @@ func NewHandleSearchEvents(retryCfg graph.RetryConfig, timeout time.Duration, de
 			logger.Error("graph API call failed",
 				"error", graph.FormatGraphError(err),
 				"duration", time.Since(start))
-			return mcp.NewToolResultError(graph.RedactGraphError(err)), nil
+			return mcp.NewToolResultError(target.graphError(err)), nil
 		}
 
 		// Convert to summary format if needed. Raw events were collected
@@ -397,7 +397,7 @@ const searchPageSize = 50
 // Parameters:
 //   - ctx: the request context.
 //   - graphClient: the authenticated Microsoft Graph client.
-//   - root: the one typed Me or Users.ByUserId request root selected locally.
+//   - target: the authorized typed root and mounted-calendar identity, if any.
 //   - retryCfg: retry configuration for transient Graph API errors.
 //   - startDatetime: the CalendarView start boundary in ISO 8601 format.
 //   - endDatetime: the CalendarView end boundary in ISO 8601 format.
@@ -417,7 +417,7 @@ const searchPageSize = 50
 func executeSearchCalendarView(
 	ctx context.Context,
 	graphClient *msgraphsdk.GraphServiceClient,
-	root *users.UserItemRequestBuilder,
+	target calendarReadTarget,
 	retryCfg graph.RetryConfig,
 	startDatetime, endDatetime, filter, timezone string,
 	maxResults int,
@@ -438,7 +438,7 @@ func executeSearchCalendarView(
 		expandFields = []string{expandFilter}
 	}
 
-	qp := &users.ItemCalendarViewRequestBuilderGetQueryParameters{
+	rootQP := &users.ItemCalendarViewRequestBuilderGetQueryParameters{
 		StartDateTime: &startDatetime,
 		EndDateTime:   &endDatetime,
 		Select:        searchEventsSelectFields,
@@ -447,21 +447,35 @@ func executeSearchCalendarView(
 		Expand:        expandFields,
 	}
 	if filter != "" {
-		qp.Filter = &filter
+		rootQP.Filter = &filter
 	}
-
-	cfg := &users.ItemCalendarViewRequestBuilderGetRequestConfiguration{
-		QueryParameters: qp,
+	rootCfg := &users.ItemCalendarViewRequestBuilderGetRequestConfiguration{
+		QueryParameters: rootQP,
+	}
+	mountedQP := &users.ItemCalendarsItemCalendarViewRequestBuilderGetQueryParameters{
+		StartDateTime: &startDatetime,
+		EndDateTime:   &endDatetime,
+		Select:        searchEventsSelectFields,
+		Orderby:       orderby,
+		Top:           &top,
+		Expand:        expandFields,
+	}
+	if filter != "" {
+		mountedQP.Filter = &filter
+	}
+	mountedCfg := &users.ItemCalendarsItemCalendarViewRequestBuilderGetRequestConfiguration{
+		QueryParameters: mountedQP,
 	}
 	if timezone != "" {
 		headers := abstractions.NewRequestHeaders()
 		headers.Add("Prefer", fmt.Sprintf("outlook.timezone=\"%s\"", timezone))
-		cfg.Headers = headers
+		rootCfg.Headers = headers
+		mountedCfg.Headers = headers
 	}
 
 	logger := logging.Logger(ctx)
 	logger.Debug("graph API request",
-		"endpoint", "GET /me/calendarView",
+		"endpoint", target.calendarViewEndpoint(),
 		"start_datetime", startDatetime,
 		"end_datetime", endDatetime,
 		"filter", filter,
@@ -470,14 +484,18 @@ func executeSearchCalendarView(
 	var resp models.EventCollectionResponseable
 	if graphErr := graph.RetryGraphCall(ctx, retryCfg, func() error {
 		var err error
-		resp, err = root.CalendarView().Get(ctx, cfg)
+		if target.isMounted() {
+			resp, err = target.root.Calendars().ByCalendarId(target.target.MountedCalendarID).CalendarView().Get(ctx, mountedCfg)
+		} else {
+			resp, err = target.root.CalendarView().Get(ctx, rootCfg)
+		}
 		return err
 	}); graphErr != nil {
 		return nil, graphErr
 	}
 
 	logger.Debug("graph API response",
-		"endpoint", "GET /me/calendarView",
+		"endpoint", target.calendarViewEndpoint(),
 		"status", "ok")
 
 	events := make([]map[string]any, 0, maxResults)
