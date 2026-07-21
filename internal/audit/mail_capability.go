@@ -13,6 +13,16 @@ func mailCapabilityForTool(toolName string) string {
 		return "draft"
 	case "mail.send_draft":
 		return "send"
+	case "mail.move_message":
+		return "move"
+	case "mail.archive_message":
+		return "archive"
+	case "mail.trash_message":
+		return "trash"
+	case "mail.restore_message":
+		return "restore"
+	case "mail.permanent_delete_message":
+		return "permanent_delete"
 	default:
 		return ""
 	}

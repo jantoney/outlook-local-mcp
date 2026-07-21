@@ -93,6 +93,10 @@ type AuditEntry struct {
 
 	// TargetCompatibility is the local tenant-context compatibility decision.
 	TargetCompatibility string `json:"target_compatibility,omitempty"`
+
+	// ConfirmationState is the final human-confirmation state for an operation
+	// that requires MCP elicitation.
+	ConfirmationState string `json:"confirmation_state,omitempty"`
 }
 
 // MaskAuditEmail masks an email address by keeping only the first character of
@@ -241,6 +245,7 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 		start := time.Now()
 		ctx = auth.WithAuditTargetRecorder(ctx)
 		ctx = auth.WithAuditOutcomeRecorder(ctx)
+		ctx = auth.WithAuditConfirmationRecorder(ctx)
 		result, err := handler(ctx, request)
 		durationMs := time.Since(start).Milliseconds()
 
@@ -286,6 +291,7 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 		targetKind := ""
 		targetView := ""
 		targetCompatibility := ""
+		confirmationState, _ := auth.AuditConfirmationFromContext(ctx)
 		if target, ok := auth.AuditTargetFromContext(ctx); ok {
 			targetAlias = target.Alias
 			targetKind = string(target.ResourceKind)
@@ -314,6 +320,7 @@ func AuditWrap(toolName, opType string, handler server.ToolHandlerFunc) server.T
 			TargetKind:          targetKind,
 			TargetView:          targetView,
 			TargetCompatibility: targetCompatibility,
+			ConfirmationState:   confirmationState,
 		}
 		EmitAuditLog(entry)
 

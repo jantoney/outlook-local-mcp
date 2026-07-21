@@ -127,6 +127,10 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildDeleteDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildAddAttachmentVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildMoveMessageVerb(c, rc, wrapTargetWrite(mailMoveMessageGuard())),
+		buildArchiveMessageVerb(c, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityArchive))),
+		buildTrashMessageVerb(c, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityTrash))),
+		buildRestoreMessageVerb(c, rc, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityRestore))),
+		buildPermanentDeleteMessageVerb(c, rc, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityPermanentDelete))),
 		buildSendDraftVerb(c, rc, wrapWrite),
 	}
 	for index := range verbs {
@@ -150,6 +154,14 @@ func requiredMailCapability(name string) auth.MailCapability {
 		return auth.MailCapabilityDraft
 	case "mail.move_message":
 		return auth.MailCapabilityMove
+	case "mail.archive_message":
+		return auth.MailCapabilityArchive
+	case "mail.trash_message":
+		return auth.MailCapabilityTrash
+	case "mail.restore_message":
+		return auth.MailCapabilityRestore
+	case "mail.permanent_delete_message":
+		return auth.MailCapabilityPermanentDelete
 	default:
 		return auth.MailCapabilityRead
 	}

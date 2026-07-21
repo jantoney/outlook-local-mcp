@@ -388,6 +388,25 @@ func TestAuditWrapPartialSuccess(t *testing.T) {
 	}
 }
 
+// TestAuditWrapCapturesConfirmationState verifies elicitation-gated destructive
+// operations publish their final human-confirmation state and exact capability.
+func TestAuditWrapCapturesConfirmationState(t *testing.T) {
+	var buf bytes.Buffer
+	setAuditState(t, true, &buf)
+	handler := func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		auth.RecordAuditConfirmation(ctx, "accepted")
+		return mcp.NewToolResultText("deleted"), nil
+	}
+	_, _ = AuditWrap("mail.permanent_delete_message", "delete", handler)(context.Background(), mcp.CallToolRequest{})
+	var entry AuditEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.ConfirmationState != "accepted" || entry.MailCapability != "permanent_delete" {
+		t.Fatalf("confirmation audit = %+v", entry)
+	}
+}
+
 // TestAuditWrapCapturesAccountPolicyCapabilityAndResource verifies the audit
 // contract records exact authorization evidence for a mail operation.
 func TestAuditWrapCapturesAccountPolicyCapabilityAndResource(t *testing.T) {

@@ -62,7 +62,7 @@
     },
     {
       "name": "mail",
-      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected target's exact action policy authorizes each operation. Organizational shared-mail reads, draft lifecycle operations, and direct small-file draft attachments use configured owner-view routes and signed target-bound references. move_message requires signed same-target source and ordinary destination references for own and shared mail and returns the destination message's new reference. Includes resumable own-draft attachment upload and human-reviewed send_draft."
+      "description": "Mail operations for Microsoft Outlook via Microsoft Graph. The selected target's exact action policy authorizes each operation. Organizational shared-mail reads, drafts, attachments, ordinary filing, One-Click Archive, Deleted Items trash and restore, and separately confirmed permanent deletion use exact owner-view routes and signed target-bound references. Move-like actions return Graph's replacement message reference; permanent deletion is destructive, human-confirmed, and never retried ambiguously. Includes resumable own-draft attachment upload and human-reviewed send_draft."
     },
     {
       "name": "account",

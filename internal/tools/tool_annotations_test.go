@@ -304,8 +304,9 @@ func TestCR0066PerVerbAnnotations_DocumentedInHelp(t *testing.T) {
 	})
 	checks := map[string][]string{
 		"mail": {
-			"add_attachment", "move_message", "send_draft",
+			"add_attachment", "move_message", "archive_message", "trash_message", "restore_message", "permanent_delete_message", "send_draft",
 			"Safety: read-only=false, destructive=false, idempotent=false, open-world=true",
+			"Safety: read-only=false, destructive=true, idempotent=true, open-world=true",
 		},
 		"account": {
 			"set_mail_policy", "set_mail_profile",

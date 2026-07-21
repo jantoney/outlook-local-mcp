@@ -23,7 +23,9 @@ func TestBuildMailVerbsIsStaticAndDeclaresCapabilities(t *testing.T) {
 		"create_reply_draft": auth.MailCapabilityDraft, "create_forward_draft": auth.MailCapabilityDraft,
 		"update_draft": auth.MailCapabilityDraft, "delete_draft": auth.MailCapabilityDraft,
 		"add_attachment": auth.MailCapabilityDraft, "send_draft": auth.MailCapabilitySend,
-		"move_message": auth.MailCapabilityMove,
+		"move_message":    auth.MailCapabilityMove,
+		"archive_message": auth.MailCapabilityArchive, "trash_message": auth.MailCapabilityTrash,
+		"restore_message": auth.MailCapabilityRestore, "permanent_delete_message": auth.MailCapabilityPermanentDelete,
 	}
 	seen := make(map[string]bool)
 	for _, verb := range verbs {
@@ -65,5 +67,8 @@ func TestCR0066VerbAnnotations(t *testing.T) {
 	assertVerb(mailVerbs, "add_attachment", false, true)
 	assertVerb(mailVerbs, "send_draft", false, true)
 	assertVerb(mailVerbs, "move_message", false, true)
+	assertVerb(mailVerbs, "archive_message", false, true)
+	assertVerb(mailVerbs, "trash_message", false, true)
+	assertVerb(mailVerbs, "restore_message", false, true)
 	assertVerb(accountVerbs, "set_mail_profile", true, false)
 }

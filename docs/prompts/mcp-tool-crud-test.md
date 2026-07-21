@@ -647,6 +647,14 @@ For denial coverage, try each shared draft verb with `draft` disabled, pass a ra
 
 For own and organizational shared mail, obtain a source `message_ref` from `list_messages` or `search_messages` and a destination from `list_folders`; set `include_refs=true` for own discovery. Choose a destination classified `ordinary`, call `move_message`, and record the returned new message reference. **Verify:** the destination is resolved before one `/messages/{source}/move` request on the exact target route, the result does not present the source reference as current, and the new reference works on that target. Try Archive, Deleted Items, Drafts, Outbox, a cross-target folder reference, and an unclassified folder reference. **Verify:** each is rejected before the move mutation and cannot bypass its separate action gate.
 
+### Archive, trash, restore, and permanent deletion
+
+With the corresponding independent target actions enabled, call `archive_message` and verify the only move destination is `archive`; this is Outlook One-Click Archive, not the Exchange Online Archive Mailbox. Call `trash_message` and verify the only destination is `deleteditems` and no permanent-delete route is constructed. Record each returned replacement message reference. Disable each exact action in turn and verify denial occurs before Graph mutation.
+
+Using the reference returned by trash, call `restore_message` with an ordinary same-target folder reference. **Verify:** the source parent matches the currently resolved Deleted Items folder before one move and a new reference is returned. Try a message outside Deleted Items plus Archive, reserved, deletion-class, unclassified, and cross-target destinations; verify no restore move occurs. Recoverable Items restoration must not be advertised.
+
+Run `permanent_delete_message` only on a disposable message with `permanent_delete` explicitly enabled and interactive MCP elicitation available. Decline once and verify no request. Then accept the warning for an unchanged message and verify exactly one `/messages/{id}/permanentDelete` call on the selected route. Change the message between review and acceptance, test unsupported elicitation, and test the disabled policy; each must stop before deletion. Verify the verb is destructive/idempotent in help, warns that Outlook cannot recover the item, notes retention/legal-hold caveats, and labels ambiguous transport or 5xx outcomes uncertain without retry.
+
 ### Step 36 -- Get attachment
 
 Using `{tool: "mail", args: {operation: "list_messages", folder: "Inbox", has_attachments: true, top: 1}}` pick a message that has attachments. If none found, skip Step 36.

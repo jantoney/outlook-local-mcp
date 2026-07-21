@@ -351,6 +351,10 @@ Shared `add_attachment` accepts only an allowlisted local file smaller than 3 Mi
 
 **Remedy:** Obtain a fresh `message_ref` from `list_messages` or `search_messages` and a classified `destination_folder_ref` from `list_folders`, using `include_refs=true` for own mail. Choose a folder marked `ordinary`. For an uncertain result, do not repeat immediately; inspect both source and destination folders and continue with the destination message's new reference if the move completed.
 
+## Archive, trash, restore, or permanent deletion is unavailable {#mail-semantic-actions}
+
+Check the exact action on the selected own-mail policy or shared alias; enabling ordinary move does not enable Archive, trash, restore, or permanent deletion. Restore also requires the current message parent to be Deleted Items and an ordinary same-target destination reference. Recoverable Items restoration is intentionally unsupported. Permanent deletion additionally requires interactive MCP elicitation for every unchanged message; unsupported, declined, stale, or failed elicitation dispatches no delete. After an uncertain destructive response, inspect the mailbox before a separately reviewed attempt.
+
 ---
 
 ## In-server documentation access

@@ -8,7 +8,6 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/desek/outlook-local-mcp/internal/resource"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
 // NewHandleMoveMessage creates an ordinary-folder move handler. Both source
@@ -45,35 +44,7 @@ func NewHandleMoveMessage(retryCfg graph.RetryConfig, timeout time.Duration, cod
 		if resolvedID != destinationID {
 			return mcp.NewToolResultError("destination folder reference no longer resolves to the same folder; no move was started"), nil
 		}
-		if err := revalidateMailTarget(ctx, target); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		body := users.NewItemMessagesItemMovePostRequestBody()
-		body.SetDestinationId(&destinationID)
-		timeoutCtx, cancel := graph.WithTimeout(ctx, timeout)
-		defer cancel()
-		moved, err := target.root.Messages().ByMessageId(sourceID).Move().Post(timeoutCtx, body, nil)
-		if err != nil {
-			return mcp.NewToolResultError(moveMutationError(target, err)), nil
-		}
-		movedID := graph.SafeStr(moved.GetId())
-		if movedID == "" {
-			recordDraftPartialSuccess(ctx)
-			return mcp.NewToolResultText("PARTIAL SUCCESS: Graph accepted the move but returned no destination message ID. Do not repeat the move; inspect the destination folder before continuing."), nil
-		}
-		reference, err := signMailItem(codec, target.target, resource.ItemKindMessage, movedID)
-		if err != nil {
-			recordDraftPartialSuccess(ctx)
-			return mcp.NewToolResultText(fmt.Sprintf("PARTIAL SUCCESS: message moved to the ordinary destination, but the new reference could not be signed.\nDestination Message ID: %s\nDo not repeat the move; inspect the destination folder.\nCompletion detail: %s", movedID, err.Error())), nil
-		}
-		response := fmt.Sprintf("Message moved to ordinary folder.\nDestination Message ID: %s\nResource Ref: %s", movedID, reference)
-		if target.isShared() {
-			response += fmt.Sprintf("\nShared Target: %s (%s)", target.target.Alias, target.target.Owner)
-		}
-		if line := AccountInfoLine(ctx); line != "" {
-			response += "\n" + line
-		}
-		return mcp.NewToolResultText(response), nil
+		return moveMessageToSemanticDestination(ctx, target, sourceID, destinationID, "Message moved to ordinary folder", timeout, codec)
 	}
 }
 

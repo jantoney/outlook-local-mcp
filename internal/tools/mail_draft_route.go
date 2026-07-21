@@ -13,12 +13,12 @@ import (
 // revalidateMailTarget checks current authority before an independently
 // committable shared-mail stage. Own direct-handler calls remain compatible.
 func revalidateMailTarget(ctx context.Context, target mailReadTarget) error {
-	if !target.isShared() {
-		return nil
-	}
 	routed, ok := graph.RoutedTargetFromContext(ctx)
 	if !ok {
-		return fmt.Errorf("mail target context is unavailable")
+		if target.isShared() {
+			return fmt.Errorf("mail target context is unavailable")
+		}
+		return nil
 	}
 	return routed.Revalidate()
 }
