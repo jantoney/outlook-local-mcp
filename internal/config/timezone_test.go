@@ -5,7 +5,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
+
+// TestEmbeddedTimezoneDataSupportsConfiguredIANAZone verifies that deployed
+// binaries can validate configured IANA names without host zoneinfo files.
+func TestEmbeddedTimezoneDataSupportsConfiguredIANAZone(t *testing.T) {
+	if _, err := time.LoadLocation("Australia/Sydney"); err != nil {
+		t.Fatalf("load configured IANA timezone from embedded data: %v", err)
+	}
+}
 
 // TestDetectTimezone_TZEnvOverridesLocal verifies that when the TZ environment
 // variable is set to a valid IANA timezone, DetectTimezone returns that value

@@ -18,6 +18,7 @@ func TestResolveTargetProducesContextOnlyAfterExactChecks(t *testing.T) {
 		t.Fatalf("NewMailAlias() error = %v", err)
 	}
 	mailAlias.Policy = MailActionPolicy{Read: true}
+	mailAlias.Validation = resource.Validation{Status: resource.ValidationAvailable}
 	entry := &AccountEntry{AccountID: accountID, Label: "work", TokenTenantContext: TokenTenantOrganizational, MailAliases: []resource.MailAlias{mailAlias}}
 
 	tests := []struct {
@@ -63,6 +64,7 @@ func TestResolveTargetBindsSignedReferenceToCurrentTarget(t *testing.T) {
 		t.Fatalf("NewMailAlias() error = %v", err)
 	}
 	alias.Policy = MailActionPolicy{Read: true}
+	alias.Validation = resource.Validation{Status: resource.ValidationAvailable}
 	entry := &AccountEntry{AccountID: accountID, Label: "work", TokenTenantContext: TokenTenantOrganizational, MailAliases: []resource.MailAlias{alias}}
 	claims := resource.ReferenceClaims{
 		AccountID: resource.AccountID(accountID), ResourceID: resourceID,

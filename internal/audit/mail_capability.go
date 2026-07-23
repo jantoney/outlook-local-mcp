@@ -9,7 +9,7 @@ func mailCapabilityForTool(toolName string) string {
 		"mail.get_attachment":
 		return "read"
 	case "mail.create_draft", "mail.create_reply_draft", "mail.create_forward_draft",
-		"mail.update_draft", "mail.delete_draft", "mail.add_attachment":
+		"mail.update_draft", "mail.delete_draft", "mail.add_attachment", "mail.remove_attachment":
 		return "draft"
 	case "mail.send_draft":
 		return "send"

@@ -25,23 +25,21 @@ The specification defaults to `"common"` but allows override via configuration.
 
 ### OAuth scopes
 
-Request the delegated scope **`Calendars.ReadWrite`** by default. This is the least-privileged delegated permission that grants full read and write access to all calendar event properties including body, subject, location, attendees, and the ability to create, update, delete, and cancel events. `Calendars.Read` would be insufficient because it does not permit write operations. `Calendars.ReadBasic` is even more limited and omits body content entirely. The `offline_access` scope is automatically included by the Azure Identity library to obtain a refresh token.
-
-When mail access is enabled via `OUTLOOK_MCP_MAIL_ENABLED=true`, the **`Mail.Read`** scope is additionally requested, granting read-only access to the user's mailbox. This scope is not requested when mail is disabled (the default). See CR-0043 for details on the opt-in mail feature.
+`User.Read` is required for every account so `/me` can resolve the signed-in identity. Optional scopes come only from explicit per-account policy: own calendar off/read/manage contributes none, `Calendars.Read`, or `Calendars.ReadWrite`; mail and shared-resource policies contribute their least-broad documented scopes. The identity library adds `offline_access` automatically.
 
 The `Calendars.ReadWrite` scope is a delegated permission that **does not require admin consent**; users can self-consent. It covers all write operations including creating events with attendees (which automatically sends invitations), cancelling events (which sends cancellation notices), and enabling Teams online meetings via the `isOnlineMeeting` flag. No `Mail.Send` or `OnlineMeetings.ReadWrite` scope is needed.
 
-When calling `msgraphsdk.NewGraphServiceClientWithCredentials`, pass scopes from `auth.Scopes(cfg)`, which returns `[]string{"Calendars.ReadWrite"}` when mail is disabled, or `[]string{"Calendars.ReadWrite", "Mail.Read"}` when mail is enabled. The SDK automatically prefixes the Graph resource URI.
+Call `auth.ScopesForAccountEntry` or `auth.ScopesForAccountConfig` to build one deterministic deduplicated union, and pass that exact slice to both token acquisition and `msgraphsdk.NewGraphServiceClientWithCredentials`. Global mail flags and cumulative mail profiles are not scope inputs.
 
 ### Device code flow sequence
 
-1. The server calls `azidentity.NewDeviceCodeCredential(options)` at startup.
+1. `account.login` (or the web UI Authenticate action) creates an in-memory session and a credential for the selected persisted account.
 2. On first authentication (no cached token), the credential's `GetToken()` method posts to `https://login.microsoftonline.com/common/oauth2/v2.0/devicecode` with the client ID and scope.
 3. Microsoft returns a `user_code` and `verification_uri` (`https://microsoft.com/devicelogin`).
 4. The `UserPrompt` callback fires. The server prints the message to **stderr** (not stdout, which is reserved for MCP JSON-RPC). The message reads something like: *"To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code ABCD1234 to authenticate."*
 5. The library polls `https://login.microsoftonline.com/common/oauth2/v2.0/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` until the user completes sign-in or the code expires (~15 minutes).
 6. On success, the credential receives `access_token`, `refresh_token`, `id_token`, and caches them.
-7. Subsequent `GetToken()` calls return the cached access token or silently refresh using the refresh token, with no user interaction required.
+7. The session publishes the scoped Graph client, persists that re-authentication is no longer required, and resolves `/me`. Subsequent starts may acquire silently when the saved policy still matches the grant.
 
 ### azidentity credential construction
 
@@ -154,18 +152,18 @@ if record == (azidentity.AuthenticationRecord{}) {
 
 ## Graph client initialization
 
-After authentication, construct the Graph client using the convenience constructor:
+After authentication, construct one Graph client per account using its exact required scope union:
 
 ```go
 graphClient, err := msgraphsdk.NewGraphServiceClientWithCredentials(
     cred,
-    []string{"Calendars.ReadWrite"},
+    auth.ScopesForAccountEntry(entry),
 )
 if err != nil {
     slog.Error("graph client initialization failed", "error", err)
     os.Exit(1)
 }
-slog.Info("graph client initialized", "scopes", []string{"Calendars.ReadWrite"})
+slog.Info("graph client initialized", "account", entry.Label)
 ```
 
-This internally creates a `kiota-authentication-azure-go` auth provider and a `GraphRequestAdapter`. The `graphClient` is stored as a package-level `*msgraphsdk.GraphServiceClient` and shared across all tool handlers. Thread safety is guaranteed by the SDK.
+This internally creates a `kiota-authentication-azure-go` auth provider and a `GraphRequestAdapter`. The client belongs to its `AccountEntry`; request middleware resolves the selected account and never falls back to a global client.

@@ -6,6 +6,8 @@
 package server
 
 import (
+	"context"
+	"github.com/desek/outlook-local-mcp/internal/accountadmin"
 	"github.com/desek/outlook-local-mcp/internal/audit"
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/config"
@@ -20,6 +22,10 @@ import (
 // accountVerbsConfig holds the dependencies required to build the account domain
 // verb slice. All fields are captured at server start.
 type accountVerbsConfig struct {
+	// admin is the shared transport-neutral account mutation module. It is nil
+	// only in legacy registration tests that construct handlers directly.
+	admin *accountadmin.Module
+
 	// registry is the account registry, used by all account handlers.
 	registry *auth.AccountRegistry
 
@@ -64,24 +70,34 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 	wrap := func(name, auditOp string, h mcpserver.ToolHandlerFunc) tools.Handler {
 		return tools.Handler(c.authMW(observability.WithObservability(name, c.m, c.tracer, audit.AuditWrap(name, auditOp, h))))
 	}
+	addHandler := tools.HandleAddAccount(c.registry, c.cfg)
+	loginHandler := tools.HandleLoginAccount(c.registry, c.cfg)
+	removeHandler := tools.HandleRemoveAccount(c.registry, c.cfg.AccountsPath)
+	logoutHandler := tools.HandleLogoutAccount(c.registry)
+	if c.admin != nil {
+		addHandler = tools.HandleConfigureAccount(c.admin)
+		loginHandler = tools.HandleAdminLogin(c.admin)
+		removeHandler = tools.HandleAdminRemove(c.admin)
+		logoutHandler = tools.HandleAdminLogout(c.admin)
+	}
 
 	addVerb := tools.Verb{
 		Name:        "add",
-		Summary:     "add and authenticate a new Microsoft account (browser/device_code/auth_code)",
-		Description: "Adds a new Microsoft account to the registry and initiates authentication using the configured or specified method (browser, device_code, or auth_code). The label is a human-readable identifier used to reference this account in subsequent calls. If the server's CLIENT_ID is a well-known name, the account uses that client; otherwise supply a client_id.",
+		Summary:     "configure a new Microsoft account and explicit initial permissions",
+		Description: "Configures a disconnected account with immutable identity settings and explicit least-privilege calendar and mail policies. Optional permissions default off. Call login after reviewing the deterministic required scope union.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"label": "work"}, Comment: "add a work account using the server's default auth method"},
 			{Args: map[string]any{"label": "personal", "auth_method": "device_code"}, Comment: "add with device code flow"},
 		},
 		SeeDocs: []string{"concepts#headless-and-non-interactive-authentication", "concepts#well-known-client-ids"},
-		Handler: wrap("account.add", "write", tools.HandleAddAccount(c.registry, c.cfg)),
+		Handler: wrap("account.add", "write", addHandler),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithIdempotentHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(true),
 		},
-		Schema: []mcp.ToolOption{
+		Schema: append([]mcp.ToolOption{
 			mcp.WithString("label",
 				mcp.Required(),
 				mcp.Description("Unique label for the account (1-64 chars, alphanumeric/underscore/hyphen)."),
@@ -95,19 +111,18 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 			mcp.WithString("auth_method",
 				mcp.Description("Authentication method: 'browser', 'device_code', or 'auth_code'. Defaults to the server's configured method."),
 			),
-			mcp.WithString("mail_profile",
-				mcp.Description("Optional legacy migration input: calendar_only, mail_read, mail_manage, or mail_send. Omit for the secure all-actions-off default."),
-				mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send"),
+			mcp.WithString("calendar_policy",
+				mcp.Description("Initial own-calendar access: off (default), read, or manage."),
+				mcp.Enum("off", "read", "manage"),
 			),
-		},
+		}, mailPolicySchema()...),
 	}
 
 	removeVerb := tools.Verb{
 		Name:        "remove",
 		Summary:     "remove an account from the registry and clear its tokens (irreversible)",
-		Description: "Removes an account from the registry and clears all cached tokens. This operation is irreversible and local-only (it does not revoke the OAuth grant with Microsoft). To reconnect the same account, use the add verb again. The implicit auto-registered 'default' account reappears only when no other accounts are connected.",
-		SeeDocs:     []string{"concepts#auto-default-account-semantics"},
-		Handler:     wrap("account.remove", "write", tools.HandleRemoveAccount(c.registry, c.cfg.AccountsPath)),
+		Description: "Removes an account from the registry and clears all cached tokens. This operation is irreversible and local-only; it does not revoke Microsoft consent. Removing the last account leaves a stable zero-account server.",
+		Handler:     wrap("account.remove", "write", removeHandler),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(true),
@@ -150,7 +165,7 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		Summary:     "re-authenticate a disconnected account without removing it",
 		Description: "Re-authenticates a disconnected account without removing it from the registry. Use this after a token has expired or the account was disconnected via logout. The label must match an existing registry entry.",
 		SeeDocs:     []string{"concepts#headless-and-non-interactive-authentication"},
-		Handler:     wrap("account.login", "write", tools.HandleLoginAccount(c.registry, c.cfg)),
+		Handler:     wrap("account.login", "write", loginHandler),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -169,7 +184,7 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		Name:        "logout",
 		Summary:     "disconnect an account without removing it; preserves config for login",
 		Description: "Disconnects an authenticated account by clearing its cached tokens. The account entry remains in the registry so that login can reconnect it without re-specifying client and tenant details. Does not revoke the OAuth grant with Microsoft.",
-		Handler:     wrap("account.logout", "write", tools.HandleLogoutAccount(c.registry)),
+		Handler:     wrap("account.logout", "write", logoutHandler),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
@@ -203,25 +218,28 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		},
 	}
 
-	setMailProfileVerb := tools.Verb{
-		Name:        "set_mail_profile",
-		Summary:     "map a legacy cumulative profile to an independent own-mail policy",
-		Description: "Transition input for calendar_only, mail_read, mail_manage, and mail_send. The profile is deterministically mapped to an independent own-mail policy without enabling move, Archive, trash, restore, or permanent deletion. Prefer set_mail_policy for new configuration.",
-		SeeDocs:     []string{"concepts#independent-mail-action-policies", "troubleshooting#revoke-microsoft-app-consent"},
-		Handler: wrap("account.set_mail_profile", "write", ReadOnlyGuard(
-			"account.set_mail_profile", c.cfg.ReadOnly, tools.HandleSetMailProfile(c.registry, c.cfg.AccountsPath))),
+	setPermissionsVerb := tools.Verb{
+		Name:        "set_permissions",
+		Summary:     "replace exact own-calendar and own-mail permissions",
+		Description: "Saves the complete local own-resource policy immediately. If the deterministic OAuth scope union changes, the account is marked re-authentication required and disconnected until login succeeds for the new union.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#token-tenant-context-and-oauth-scope-union", "troubleshooting#revoke-microsoft-app-consent"},
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithIdempotentHintAnnotation(true),
 			mcp.WithOpenWorldHintAnnotation(false),
 		},
-		Schema: []mcp.ToolOption{
+		Schema: append([]mcp.ToolOption{
 			mcp.WithString("label", mcp.Required(), mcp.Description("Label of the account to change.")),
-			mcp.WithString("mail_profile", mcp.Required(),
-				mcp.Description("New capability profile."),
-				mcp.Enum("calendar_only", "mail_read", "mail_manage", "mail_send")),
-		},
+			mcp.WithString("calendar_policy", mcp.Required(), mcp.Description("Exact own-calendar access."), mcp.Enum("off", "read", "manage")),
+		}, mailPolicySchema()...),
+	}
+	if c.admin != nil {
+		setPermissionsVerb.Handler = wrap("account.set_permissions", "write", tools.HandleAdminSetPermissions(c.admin))
+	} else {
+		setPermissionsVerb.Handler = wrap("account.set_permissions", "write", func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultError("account administration module unavailable"), nil
+		})
 	}
 
 	setMailPolicyVerb := tools.Verb{
@@ -241,6 +259,9 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 			mcp.WithString("label", mcp.Required(), mcp.Description("Label of the account to change.")),
 		}, mailPolicySchema()...),
 	}
+	if c.admin != nil {
+		setMailPolicyVerb.Handler = wrap("account.set_mail_policy", "write", tools.HandleAdminSetMailPolicy(c.admin))
+	}
 
 	verbs := []tools.Verb{
 		help.NewHelpVerb(registryPtr),
@@ -250,8 +271,40 @@ func buildAccountVerbs(c accountVerbsConfig) ([]tools.Verb, *tools.VerbRegistry)
 		loginVerb,
 		logoutVerb,
 		refreshVerb,
+		setPermissionsVerb,
 		setMailPolicyVerb,
-		setMailProfileVerb,
+	}
+	if c.admin != nil {
+		verbs = append(verbs,
+			tools.Verb{
+				Name: "refresh_shared_resources", Summary: "discover calendars and validate configured shared resources",
+				Description: "Observationally re-enumerates /me/calendars and performs bounded metadata-only validation for every configured shared calendar and mailbox. It never adds, removes, disables, retargets, or changes permissions. Discovery failure preserves manual-entry workflows.",
+				Handler:     wrap("account.refresh_shared_resources", "read", tools.HandleRefreshSharedResources(c.admin)),
+				Annotations: []mcp.ToolOption{mcp.WithReadOnlyHintAnnotation(true), mcp.WithDestructiveHintAnnotation(false), mcp.WithIdempotentHintAnnotation(true), mcp.WithOpenWorldHintAnnotation(true)},
+				Schema:      []mcp.ToolOption{mcp.WithString("label", mcp.Required(), mcp.Description("Account label to refresh."))},
+			},
+			tools.Verb{
+				Name: "auth_status", Summary: "inspect a process-bound authentication session",
+				Description: "Returns secret-free authentication progress. Device-code instructions appear here after login starts. Sessions expire and are cleared with the MCP process.",
+				Handler:     wrap("account.auth_status", "read", tools.HandleAdminAuthStatus(c.admin)),
+				Annotations: []mcp.ToolOption{mcp.WithReadOnlyHintAnnotation(true), mcp.WithDestructiveHintAnnotation(false), mcp.WithIdempotentHintAnnotation(true), mcp.WithOpenWorldHintAnnotation(false)},
+				Schema:      []mcp.ToolOption{mcp.WithString("session_id", mcp.Required(), mcp.Description("Opaque session ID returned by account.login."))},
+			},
+			tools.Verb{
+				Name: "complete_auth", Summary: "complete an auth_code account session",
+				Description: "Exchanges the full Microsoft redirect URL for the exact required scope union. Redirect data is never logged or persisted.",
+				Handler:     wrap("account.complete_auth", "write", tools.HandleAdminCompleteAuth(c.admin)),
+				Annotations: []mcp.ToolOption{mcp.WithReadOnlyHintAnnotation(false), mcp.WithDestructiveHintAnnotation(false), mcp.WithIdempotentHintAnnotation(false), mcp.WithOpenWorldHintAnnotation(true)},
+				Schema:      []mcp.ToolOption{mcp.WithString("session_id", mcp.Required()), mcp.WithString("redirect_url", mcp.Required())},
+			},
+			tools.Verb{
+				Name: "cancel_auth", Summary: "cancel an active authentication session",
+				Description: "Cancels process-bound authentication without changing account permissions.",
+				Handler:     wrap("account.cancel_auth", "write", tools.HandleAdminCancelAuth(c.admin)),
+				Annotations: []mcp.ToolOption{mcp.WithReadOnlyHintAnnotation(false), mcp.WithDestructiveHintAnnotation(false), mcp.WithIdempotentHintAnnotation(true), mcp.WithOpenWorldHintAnnotation(false)},
+				Schema:      []mcp.ToolOption{mcp.WithString("session_id", mcp.Required())},
+			},
+		)
 	}
 	verbs = append(verbs, buildCalendarAliasVerbs(c, wrap)...)
 	verbs = append(verbs, buildMailAliasVerbs(c, wrap)...)

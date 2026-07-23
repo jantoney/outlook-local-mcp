@@ -22,7 +22,8 @@ func TestBuildMailVerbsIsStaticAndDeclaresCapabilities(t *testing.T) {
 		"get_attachment": auth.MailCapabilityRead, "create_draft": auth.MailCapabilityDraft,
 		"create_reply_draft": auth.MailCapabilityDraft, "create_forward_draft": auth.MailCapabilityDraft,
 		"update_draft": auth.MailCapabilityDraft, "delete_draft": auth.MailCapabilityDraft,
-		"add_attachment": auth.MailCapabilityDraft, "send_draft": auth.MailCapabilitySend,
+		"add_attachment": auth.MailCapabilityDraft, "remove_attachment": auth.MailCapabilityDraft,
+		"send_draft":      auth.MailCapabilitySend,
 		"move_message":    auth.MailCapabilityMove,
 		"archive_message": auth.MailCapabilityArchive, "trash_message": auth.MailCapabilityTrash,
 		"restore_message": auth.MailCapabilityRestore, "permanent_delete_message": auth.MailCapabilityPermanentDelete,
@@ -42,12 +43,30 @@ func TestBuildMailVerbsIsStaticAndDeclaresCapabilities(t *testing.T) {
 	}
 }
 
+// TestCR0070RemoveAttachmentAnnotations verifies attachment removal is exposed
+// as a destructive, idempotent Graph mutation.
+func TestCR0070RemoveAttachmentAnnotations(t *testing.T) {
+	identity := func(handler mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc { return handler }
+	verbs, _ := buildMailVerbs(mailVerbsConfig{cfg: config.Config{}, authMW: identity, accountResolverMW: identity})
+	for _, verb := range verbs {
+		if verb.Name != "remove_attachment" {
+			continue
+		}
+		annotations := mcp.NewTool(verb.Name, verb.Annotations...).Annotations
+		if annotations.ReadOnlyHint == nil || *annotations.ReadOnlyHint || annotations.DestructiveHint == nil || !*annotations.DestructiveHint ||
+			annotations.IdempotentHint == nil || !*annotations.IdempotentHint || annotations.OpenWorldHint == nil || !*annotations.OpenWorldHint {
+			t.Fatalf("remove_attachment annotations = %+v", annotations)
+		}
+		return
+	}
+	t.Fatal("remove_attachment verb not registered")
+}
+
 // TestCR0066VerbAnnotations verifies the three new verbs explicitly declare
 // their per-verb safety and open-world semantics.
 func TestCR0066VerbAnnotations(t *testing.T) {
 	identity := func(handler mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc { return handler }
 	mailVerbs, _ := buildMailVerbs(mailVerbsConfig{cfg: config.Config{}, authMW: identity, accountResolverMW: identity})
-	accountVerbs, _ := buildAccountVerbs(accountVerbsConfig{cfg: config.Config{}, authMW: identity})
 	assertVerb := func(verbs []tools.Verb, name string, idempotent, openWorld bool) {
 		t.Helper()
 		for _, verb := range verbs {
@@ -70,5 +89,4 @@ func TestCR0066VerbAnnotations(t *testing.T) {
 	assertVerb(mailVerbs, "archive_message", false, true)
 	assertVerb(mailVerbs, "trash_message", false, true)
 	assertVerb(mailVerbs, "restore_message", false, true)
-	assertVerb(accountVerbs, "set_mail_profile", true, false)
 }

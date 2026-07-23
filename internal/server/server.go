@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/accountadmin"
 	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/config"
 	"github.com/desek/outlook-local-mcp/internal/docs"
@@ -52,6 +53,31 @@ import (
 // Side effects: registers tool handlers on the server and logs a completion
 // message.
 func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout time.Duration, m *observability.ToolMetrics, t trace.Tracer, readOnly bool, authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc, registry *auth.AccountRegistry, cfg config.Config, cred auth.Authenticator, referenceCodecs ...*resource.ReferenceCodec) {
+	registerTools(s, retryCfg, timeout, m, t, readOnly, authMW, registry, cfg, cred, nil, referenceCodecs...)
+}
+
+// RegisterToolsWithAdmin registers all domain tools and injects the shared
+// transport-neutral account administration module used by the web adapter.
+// Parameters and side effects otherwise match RegisterTools.
+func RegisterToolsWithAdmin(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout time.Duration, m *observability.ToolMetrics, t trace.Tracer, readOnly bool, authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc, registry *auth.AccountRegistry, cfg config.Config, cred auth.Authenticator, admin *accountadmin.Module, referenceCodecs ...*resource.ReferenceCodec) {
+	registerTools(s, retryCfg, timeout, m, t, readOnly, authMW, registry, cfg, cred, admin, referenceCodecs...)
+}
+
+// RegisterToolsWithAdminAndReplayCatalog registers all domain tools and returns
+// the exact domain.operation identities that are explicitly annotated as
+// read-only. The broker publishes this catalog to stdio proxies so transport
+// recovery can replay reads while failing closed for writes and unknown verbs.
+//
+// Parameters and side effects otherwise match [RegisterToolsWithAdmin].
+// The returned catalog is an immutable startup snapshot; callers must not
+// mutate it.
+func RegisterToolsWithAdminAndReplayCatalog(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout time.Duration, m *observability.ToolMetrics, t trace.Tracer, readOnly bool, authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc, registry *auth.AccountRegistry, cfg config.Config, cred auth.Authenticator, admin *accountadmin.Module, referenceCodecs ...*resource.ReferenceCodec) ReplayCatalog {
+	return registerTools(s, retryCfg, timeout, m, t, readOnly, authMW, registry, cfg, cred, admin, referenceCodecs...)
+}
+
+// registerTools contains the shared registration implementation.
+func registerTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout time.Duration, m *observability.ToolMetrics, t trace.Tracer, readOnly bool, authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc, registry *auth.AccountRegistry, cfg config.Config, cred auth.Authenticator, admin *accountadmin.Module, referenceCodecs ...*resource.ReferenceCodec) ReplayCatalog {
+	replayCatalog := NewReplayCatalog()
 	accountResolverMW := auth.AccountResolver(registry)
 	var referenceCodec *resource.ReferenceCodec
 	if len(referenceCodecs) > 0 {
@@ -90,6 +116,7 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 		accountResolverMW:    accountResolverMW,
 		readOnly:             readOnly,
 	})
+	replayCatalog.AddVerbs("calendar", calVerbs)
 	populatedCal := tools.RegisterDomainTool(s, tools.DomainToolConfig{
 		Domain:          "calendar",
 		Intro:           "Calendar operations for Microsoft Outlook via Microsoft Graph.",
@@ -112,10 +139,12 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 	accVerbs, accRegistry := buildAccountVerbs(accountVerbsConfig{
 		registry: registry,
 		cfg:      cfg,
+		admin:    admin,
 		m:        m,
 		tracer:   t,
 		authMW:   authMW,
 	})
+	replayCatalog.AddVerbs("account", accVerbs)
 	populatedAcc := tools.RegisterDomainTool(s, tools.DomainToolConfig{
 		Domain:          "account",
 		Intro:           "Account management for Microsoft accounts connected to the Outlook MCP server.",
@@ -139,9 +168,8 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 		startTime: time.Now(),
 		m:         m,
 		tracer:    t,
-		authMW:    authMW,
-		cred:      cred,
 	})
+	replayCatalog.AddVerbs("system", sysVerbs)
 	populated := tools.RegisterDomainTool(s, tools.DomainToolConfig{
 		Domain:          "system",
 		Intro:           "System diagnostics and authentication utilities for the Outlook MCP server.",
@@ -175,6 +203,7 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 		accountResolverMW:    accountResolverMW,
 		readOnly:             readOnly,
 	})
+	replayCatalog.AddVerbs("mail", mailVerbs)
 	populatedMail := tools.RegisterDomainTool(s, tools.DomainToolConfig{
 		Domain:          "mail",
 		Intro:           "Mail operations for Microsoft Outlook via Microsoft Graph.",
@@ -188,6 +217,7 @@ func RegisterTools(s *mcpserver.MCPServer, retryCfg graph.RetryConfig, timeout t
 	toolCount := 4
 
 	slog.Info("tool registration complete", "tools", toolCount)
+	return replayCatalog
 }
 
 // RegisterResources registers each embedded documentation document as an MCP

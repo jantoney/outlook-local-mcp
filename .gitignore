@@ -53,3 +53,5 @@ docs/bench/runs/
 /bin/
 /.worktrees/
 docs/research/cr-0060-token-economics/runs/
+.cache/
+.tmp/

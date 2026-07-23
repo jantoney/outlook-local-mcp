@@ -492,9 +492,9 @@ func TestRegisterTools_BackwardCompatSingleAccount(t *testing.T) {
 	}
 }
 
-// TestRegisterTools_CompleteAuthRegistered verifies that the complete_auth tool
-// is registered when AuthMethod is "auth_code".
-func TestRegisterTools_CompleteAuthRegistered(t *testing.T) {
+// TestRegisterToolsSystemCompleteAuthRemoved verifies auth-code completion is
+// never exposed through the system domain, even when it is the identity default.
+func TestRegisterToolsSystemCompleteAuthRemoved(t *testing.T) {
 	s := mcpserver.NewMCPServer("test-server", "0.0.1",
 		mcpserver.WithToolCapabilities(false),
 		mcpserver.WithRecovery(),
@@ -530,13 +530,8 @@ func TestRegisterTools_CompleteAuthRegistered(t *testing.T) {
 		t.Fatalf("expected *CallToolResult, got %T", rpcResp.Result)
 	}
 
-	// The mock ExchangeCode succeeds, so we expect a success result.
-	if result.IsError {
-		if len(result.Content) > 0 {
-			if tc, ok := result.Content[0].(mcp.TextContent); ok {
-				t.Errorf("expected success, got error: %s", tc.Text)
-			}
-		}
+	if !result.IsError {
+		t.Fatal("expected system.complete_auth to be unavailable")
 	}
 }
 

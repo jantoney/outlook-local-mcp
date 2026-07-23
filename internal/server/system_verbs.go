@@ -15,7 +15,6 @@ import (
 	"github.com/desek/outlook-local-mcp/internal/tools"
 	"github.com/desek/outlook-local-mcp/internal/tools/help"
 	"github.com/mark3labs/mcp-go/mcp"
-	mcpserver "github.com/mark3labs/mcp-go/server"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -39,14 +38,6 @@ type systemVerbsConfig struct {
 
 	// tracer is the OTEL tracer for span creation.
 	tracer trace.Tracer
-
-	// authMW is the authentication middleware factory, applied only to the
-	// complete_auth verb.
-	authMW func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc
-
-	// cred is the default authenticator for the complete_auth verb. May be nil
-	// when auth_code is not the active auth method.
-	cred auth.Authenticator
 }
 
 // buildSystemVerbs constructs the ordered []tools.Verb slice for the system
@@ -141,7 +132,7 @@ func buildSystemVerbs(c systemVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		Description: "Searches the embedded documentation bundle for a keyword or phrase and returns ranked snippets with 1-based line numbers. Use this to locate relevant sections before calling get_docs. Search is case-insensitive and matches substrings across all four embedded files.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"query": "token refresh"}, Comment: "find docs about token refresh"},
-			{Args: map[string]any{"query": "MAIL_ENABLED"}, Comment: "find docs about mail gating"},
+			{Args: map[string]any{"query": "web UI"}, Comment: "find docs about local account administration"},
 		},
 		SeeDocs: []string{"concepts#in-server-documentation-surface"},
 		Handler: tools.Handler(searchDocsHandler),
@@ -208,62 +199,20 @@ func buildSystemVerbs(c systemVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		getDocsVerb,
 	}
 
-	// complete_auth verb: conditional on auth_code; requires authMW and network.
-	if c.cfg.AuthMethod == "auth_code" {
-		innerHandler := audit.AuditWrap(
-			"system.complete_auth", "write",
-			tools.HandleCompleteAuth(c.cred, c.cfg.AuthRecordPath, c.registry, auth.Scopes(c.cfg)),
-		)
-		obsHandler := observability.WithObservability("system.complete_auth", c.m, c.tracer, innerHandler)
-		authedHandler := c.authMW(obsHandler)
-
-		completeAuthVerb := tools.Verb{
-			Name:        "complete_auth",
-			Summary:     "exchange browser redirect URL for tokens to finish auth_code flow",
-			Description: "Exchanges the browser redirect URL from the auth_code flow for OAuth tokens, completing the authentication handshake. Only registered when AuthMethod=auth_code. Copy the full URL from the browser's address bar after signing in and pass it as redirect_url.",
-			SeeDocs:     []string{"concepts#headless-and-non-interactive-authentication"},
-			Handler:     tools.Handler(authedHandler),
-			Annotations: []mcp.ToolOption{
-				mcp.WithReadOnlyHintAnnotation(false),
-				mcp.WithDestructiveHintAnnotation(false),
-				mcp.WithIdempotentHintAnnotation(false),
-				mcp.WithOpenWorldHintAnnotation(true),
-			},
-			Schema: []mcp.ToolOption{
-				mcp.WithString("redirect_url",
-					mcp.Required(),
-					mcp.Description("The full URL from the browser's address bar after signing in."),
-				),
-				mcp.WithString("account",
-					mcp.Description("Account label or UPN that was provided to account_add when initiating auth_code authentication."),
-				),
-			},
-		}
-		verbs = append(verbs, completeAuthVerb)
-	}
-
 	return verbs, registryPtr
 }
 
 // systemToolAnnotations returns the conservative aggregate MCP annotations for
 // the system domain tool per CR-0060 FR-9 and AC-9.
 //
-// readOnlyHint is false because the domain may host the write complete_auth
-// verb (when auth_code is active). destructiveHint is false because no verb
-// irreversibly deletes data. idempotentHint is false because complete_auth is
-// non-idempotent. openWorldHint is true because complete_auth calls Microsoft
-// Graph.
-//
-// These values represent the most conservative annotation across all verbs that
-// may be registered for the domain. Even when complete_auth is absent (no
-// auth_code), the manifest-level annotation is fixed at construction time and
-// must remain consistent across deployment configurations.
+// Every system verb is local, read-only, and idempotent. Account authentication,
+// including auth_code completion, belongs to the account domain session seam.
 func systemToolAnnotations() []mcp.ToolOption {
 	return []mcp.ToolOption{
 		mcp.WithTitleAnnotation("System"),
-		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	}
 }

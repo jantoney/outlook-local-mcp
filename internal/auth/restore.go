@@ -145,6 +145,24 @@ func RestoreAccountsByProfile(
 		ScopesForProfile, defaultProfile, tokenStorage)
 }
 
+// RestoreExplicitAccounts restores schema-v2 accounts using only each record's
+// explicit calendar, mail, and shared-resource policies. tokenStorage selects
+// the credential cache backend. The return values are connected and total
+// account counts; malformed persistence or credential failures are logged and
+// fail closed per account.
+func RestoreExplicitAccounts(
+	accountsPath string,
+	cacheNameBase string,
+	authRecordDir string,
+	registry *AccountRegistry,
+	credFactory CredentialFactory,
+	tokenStorage string,
+) (restored int, total int) {
+	return restoreAccounts(accountsPath, cacheNameBase, authRecordDir, registry, credFactory,
+		func(scopes []string) GraphClientFactory { return NewDefaultGraphClientFactory(scopes) },
+		ScopesForProfile, MailProfileCalendarOnly, tokenStorage)
+}
+
 // restoreAccounts contains the shared restoration loop for legacy fixed-scope
 // callers and profile-aware production startup. It first persists missing
 // account identities; migration or load failures are logged and return zero
@@ -188,11 +206,7 @@ func restoreAccounts(
 			policy = *acct.MailPolicy
 		}
 		profile := LegacyProfileForPolicy(policy)
-		accountScopes := OAuthScopeUnion(
-			scopesForProfile(profile),
-			calendarAliasesFromConfig(acct),
-			mailAliasesFromConfig(acct),
-		)
+		accountScopes := ScopesForAccountConfig(acct)
 		if restoreOne(acct, cacheNameBase, authRecordDir, registry, credFactory,
 			clientFactoryForScopes(accountScopes), accountScopes, profile, tokenStorage) {
 			restored++
@@ -287,19 +301,21 @@ func restoreOne(
 	}
 
 	entry := &AccountEntry{
-		AccountID:          acct.AccountID,
-		Label:              acct.Label,
-		ClientID:           acct.ClientID,
-		TenantID:           acct.TenantID,
-		AuthMethod:         acct.AuthMethod,
-		Credential:         cred,
-		Authenticator:      authenticator,
-		AuthRecordPath:     authRecordPath,
-		CacheName:          cacheName,
-		MailProfile:        profile,
-		MailPolicy:         MailPolicyFromProfile(profile),
-		Scopes:             append([]string(nil), scopes...),
-		TokenTenantContext: TokenTenantContextFromAuthState(acct.AuthMethod, authRecordPath),
+		AccountID:                acct.AccountID,
+		Label:                    acct.Label,
+		ClientID:                 acct.ClientID,
+		TenantID:                 acct.TenantID,
+		AuthMethod:               acct.AuthMethod,
+		CalendarPolicy:           calendarPolicyFromConfig(acct),
+		ReauthenticationRequired: acct.ReauthenticationRequired,
+		Credential:               cred,
+		Authenticator:            authenticator,
+		AuthRecordPath:           authRecordPath,
+		CacheName:                cacheName,
+		MailProfile:              profile,
+		MailPolicy:               MailPolicyFromProfile(profile),
+		Scopes:                   append([]string(nil), scopes...),
+		TokenTenantContext:       TokenTenantContextFromAuthState(acct.AuthMethod, authRecordPath),
 	}
 	if acct.CalendarAliases != nil {
 		entry.CalendarAliases = append([]resource.CalendarAlias(nil), (*acct.CalendarAliases)...)
@@ -328,7 +344,7 @@ func restoreOne(
 	// When the auth record exists, the credential can satisfy the request from
 	// its file cache without starting an interactive flow, matching the
 	// behavior of browser/auth_code accounts.
-	attemptSilent := acct.AuthMethod != "device_code" || authRecordExists(authRecordPath)
+	attemptSilent := !acct.ReauthenticationRequired && (acct.AuthMethod != "device_code" || authRecordExists(authRecordPath))
 
 	if attemptSilent {
 		// Attempt silent token acquisition with a bounded timeout.
@@ -354,6 +370,8 @@ func restoreOne(
 			logger.Info("silent auth failed, account will need re-authentication on first use",
 				"error", tokenErr)
 		}
+	} else if acct.ReauthenticationRequired {
+		logger.Info("account requires authentication for its configured permission set")
 	} else {
 		logger.Info("device_code account skipped silent auth (no auth record), re-authentication deferred to first use")
 	}

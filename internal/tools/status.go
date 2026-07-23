@@ -58,6 +58,10 @@ type statusResponse struct {
 	// whole seconds.
 	ServerUptimeSeconds int64 `json:"server_uptime_seconds"`
 
+	// Broker describes the authoritative multi-session runtime without exposing
+	// its private address or capability token.
+	Broker statusBroker `json:"broker"`
+
 	// Config contains the server's effective runtime configuration grouped
 	// into six categories: identity, logging, storage, graph_api, features,
 	// and observability.
@@ -67,6 +71,22 @@ type statusResponse struct {
 	// discover the doc:// URI scheme, the troubleshooting slug, and the
 	// docs version from a single known entry point (CR-0061 AC-5).
 	Docs statusDocs `json:"docs"`
+}
+
+// statusBroker contains safe diagnostics for the dedicated broker lifecycle.
+type statusBroker struct {
+	// Role is "broker" for the authoritative state owner.
+	Role string `json:"role"`
+	// InstanceFingerprint identifies compatible launches.
+	InstanceFingerprint string `json:"instance_fingerprint"`
+	// StateFingerprint identifies the guarded persistence realm.
+	StateFingerprint string `json:"state_fingerprint"`
+	// PID is the broker operating-system process identifier.
+	PID int `json:"pid"`
+	// Clients is the number of unexpired stdio proxy leases.
+	Clients int `json:"clients"`
+	// UIOwner indicates whether this broker owns the active web UI listener.
+	UIOwner bool `json:"ui_owner"`
 }
 
 // statusDocs describes the in-server documentation surface exposed by
@@ -105,6 +125,16 @@ type statusAccount struct {
 	// (e.g., "browser", "device_code", "auth_code"). May be empty when the
 	// account was registered without a persisted method.
 	AuthMethod string `json:"auth_method"`
+
+	// CalendarPolicy is the explicit local own-calendar access level.
+	CalendarPolicy auth.CalendarPolicy `json:"calendar_policy"`
+
+	// ReauthenticationRequired indicates the active grant is not current for
+	// the configured required scope union.
+	ReauthenticationRequired bool `json:"reauthentication_required"`
+
+	// ActiveScopes is the scope set bound to the current authenticated client.
+	ActiveScopes []string `json:"active_scopes"`
 
 	// MailPolicy is the account's active independent own-mail action matrix.
 	MailPolicy auth.MailActionPolicy `json:"mail_policy"`
@@ -246,17 +276,14 @@ type statusConfigFeatures struct {
 	// ReadOnly indicates whether write operations are disabled.
 	ReadOnly bool `json:"read_only"`
 
-	// MailEnabled indicates whether read-only email access is active.
-	MailEnabled bool `json:"mail_enabled"`
+	// WebUIEnabled is the requested optional web UI state.
+	WebUIEnabled bool `json:"web_ui_enabled"`
 
-	// MailManageEnabled indicates whether draft management (Mail.ReadWrite) is
-	// active; draft/reply/forward/update/delete tools are registered only when
-	// this flag is set (see CR-0058).
-	MailManageEnabled bool `json:"mail_manage_enabled"`
+	// WebUIURL is the active loopback URL, empty when disabled or unavailable.
+	WebUIURL string `json:"web_ui_url,omitempty"`
 
-	// MailSendEnabled indicates that the backward-compatible default profile
-	// includes human-confirmed draft sending.
-	MailSendEnabled bool `json:"mail_send_enabled"`
+	// WebUIError contains a non-fatal startup failure when the UI was requested.
+	WebUIError string `json:"web_ui_error,omitempty"`
 
 	// ProvenanceTag is the extended property name for MCP-created events.
 	ProvenanceTag string `json:"provenance_tag"`
@@ -306,24 +333,39 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 		accounts := make([]statusAccount, 0, len(entries))
 		for _, entry := range entries {
 			accounts = append(accounts, statusAccount{
-				Label:                 entry.Label,
-				Authenticated:         entry.Authenticated,
-				UPN:                   entry.Email,
-				AuthMethod:            entry.AuthMethod,
-				MailPolicy:            entry.MailPolicy,
-				OutlookResourceRights: entry.MailPolicy,
-				OAuthScopes:           auth.ScopesForAccountEntry(entry),
-				TokenTenantContext:    entry.EffectiveTokenTenantContext(),
-				CalendarAliases:       append([]resource.CalendarAlias{}, entry.CalendarAliases...),
-				MailAliases:           append([]resource.MailAlias{}, entry.MailAliases...),
+				Label:                    entry.Label,
+				Authenticated:            entry.Authenticated,
+				UPN:                      entry.Email,
+				AuthMethod:               entry.AuthMethod,
+				CalendarPolicy:           entry.CalendarPolicy,
+				ReauthenticationRequired: entry.ReauthenticationRequired,
+				ActiveScopes:             append([]string(nil), entry.Scopes...),
+				MailPolicy:               entry.MailPolicy,
+				OutlookResourceRights:    entry.MailPolicy,
+				OAuthScopes:              auth.ScopesForAccountEntry(entry),
+				TokenTenantContext:       entry.EffectiveTokenTenantContext(),
+				CalendarAliases:          append([]resource.CalendarAlias{}, entry.CalendarAliases...),
+				MailAliases:              append([]resource.MailAlias{}, entry.MailAliases...),
 			})
 		}
 
+		clientCount := 0
+		if cfg.BrokerClientCount != nil {
+			clientCount = cfg.BrokerClientCount()
+		}
 		resp := statusResponse{
 			Version:             cfg.Version,
 			Timezone:            cfg.DefaultTimezone,
 			Accounts:            accounts,
 			ServerUptimeSeconds: int64(time.Since(startTime).Seconds()),
+			Broker: statusBroker{
+				Role:                cfg.BrokerRole,
+				InstanceFingerprint: cfg.BrokerInstanceFingerprint,
+				StateFingerprint:    cfg.BrokerStateFingerprint,
+				PID:                 cfg.BrokerPID,
+				Clients:             clientCount,
+				UIOwner:             cfg.BrokerUIOwner,
+			},
 			Docs: statusDocs{
 				BaseURI:             "doc://outlook-local-mcp/",
 				TroubleshootingSlug: "troubleshooting",
@@ -358,11 +400,11 @@ func HandleStatus(cfg config.Config, registry *auth.AccountRegistry, startTime t
 					ShutdownTimeoutSeconds: int(cfg.ShutdownTimeout.Seconds()),
 				},
 				Features: statusConfigFeatures{
-					ReadOnly:          cfg.ReadOnly,
-					MailEnabled:       cfg.MailEnabled,
-					MailManageEnabled: cfg.MailManageEnabled,
-					MailSendEnabled:   cfg.MailSendEnabled,
-					ProvenanceTag:     cfg.ProvenanceTag,
+					ReadOnly:      cfg.ReadOnly,
+					WebUIEnabled:  cfg.WebUIEnabled,
+					WebUIURL:      cfg.WebUIURL,
+					WebUIError:    cfg.WebUIError,
+					ProvenanceTag: cfg.ProvenanceTag,
 				},
 				Observability: statusConfigObservability{
 					OTELEnabled:     cfg.OTELEnabled,

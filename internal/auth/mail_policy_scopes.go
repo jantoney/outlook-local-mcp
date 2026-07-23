@@ -4,7 +4,7 @@ package auth
 // required by policy. The result is newly allocated and does not authorize an
 // action; callers must still enforce the exact target capability locally.
 func ScopesForMailPolicy(policy MailActionPolicy) []string {
-	scopes := []string{userReadScope, calendarScope}
+	scopes := []string{}
 	if policy.Send {
 		return OAuthScopeUnion(scopes, []string{mailReadWriteScope, mailSendScope})
 	}

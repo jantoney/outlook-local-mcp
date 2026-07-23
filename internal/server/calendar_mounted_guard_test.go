@@ -214,6 +214,7 @@ func mountedGuardFixtureWithProfile(t *testing.T, client *msgraphsdk.GraphServic
 	if err != nil {
 		t.Fatalf("NewMountedCalendar() error = %v", err)
 	}
+	alias.Validation = resource.Validation{Status: resource.ValidationAvailable}
 	entry := &auth.AccountEntry{
 		AccountID: auth.AccountID("11111111-1111-4111-8111-111111111111"),
 		Label:     "work", Client: client, Authenticated: true,

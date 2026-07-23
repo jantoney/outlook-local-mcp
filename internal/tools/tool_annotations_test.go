@@ -188,9 +188,8 @@ func TestAggregateAnnotations_Account(t *testing.T) {
 // TestAggregateAnnotations_System verifies the conservative aggregate
 // annotations on the "system" domain tool (AC-9 / FR-9).
 //
-// system hosts complete_auth (write, non-idempotent) when auth_code is active,
-// and status (read). No verb is destructive. Conservative: readOnly=false,
-// destructive=false, idempotent=false, openWorld=true.
+// Every system verb is local, read-only, and idempotent. Authentication is in
+// the account domain.
 func TestAggregateAnnotations_System(t *testing.T) {
 	s := buildTestServer(t, config.Config{
 		AuthRecordPath: "/tmp/test",
@@ -200,10 +199,10 @@ func TestAggregateAnnotations_System(t *testing.T) {
 	tool := getRegisteredTool(t, s, "system")
 	assertAggregateAnnotations(t, tool, aggregateAnnotationExpectation{
 		title:       "System",
-		readOnly:    false,
+		readOnly:    true,
 		destructive: false,
-		idempotent:  false,
-		openWorld:   true,
+		idempotent:  true,
+		openWorld:   false,
 	})
 }
 
@@ -304,12 +303,12 @@ func TestCR0066PerVerbAnnotations_DocumentedInHelp(t *testing.T) {
 	})
 	checks := map[string][]string{
 		"mail": {
-			"add_attachment", "move_message", "archive_message", "trash_message", "restore_message", "permanent_delete_message", "send_draft",
+			"add_attachment", "remove_attachment", "move_message", "archive_message", "trash_message", "restore_message", "permanent_delete_message", "send_draft",
 			"Safety: read-only=false, destructive=false, idempotent=false, open-world=true",
 			"Safety: read-only=false, destructive=true, idempotent=true, open-world=true",
 		},
 		"account": {
-			"set_mail_policy", "set_mail_profile",
+			"set_mail_policy", "set_permissions",
 			"Safety: read-only=false, destructive=false, idempotent=true, open-world=false",
 		},
 	}

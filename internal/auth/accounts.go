@@ -39,6 +39,14 @@ type AccountConfig struct {
 	// (e.g., "auth_code", "browser", "device_code").
 	AuthMethod string `json:"auth_method"`
 
+	// CalendarPolicy is the explicit own-calendar permission selected by the
+	// user. Nil is accepted only as pre-CR-0069 migration input.
+	CalendarPolicy *CalendarPolicy `json:"calendar_policy,omitempty"`
+
+	// ReauthenticationRequired records that the current token grant does not
+	// match the account's configured deterministic scope union.
+	ReauthenticationRequired bool `json:"reauthentication_required,omitempty"`
+
 	// UPN is the User Principal Name (e.g., "alice@contoso.com") resolved
 	// from the Microsoft Graph /me endpoint after authentication. It serves
 	// as a stable, human-recognizable account identity that is persisted
@@ -68,6 +76,10 @@ type AccountConfig struct {
 // AccountsFile is the top-level structure of the persistent accounts JSON file.
 // It wraps a slice of AccountConfig entries.
 type AccountsFile struct {
+	// SchemaVersion identifies the persisted account-policy schema. Version 2
+	// introduces explicit own-calendar access and the breaking auth reset.
+	SchemaVersion int `json:"schema_version"`
+
 	// Accounts is the list of persisted account configurations.
 	Accounts []AccountConfig `json:"accounts"`
 }
@@ -110,7 +122,23 @@ func LoadAccounts(path string) ([]AccountConfig, error) {
 // Side effects: creates or overwrites the file at path. Creates the parent
 // directory if it does not exist.
 func SaveAccounts(path string, accounts []AccountConfig) error {
-	file := AccountsFile{Accounts: accounts}
+	return saveAccountsWithRename(path, accounts, os.Rename)
+}
+
+// saveAccountsWithRename implements [SaveAccounts] with an injected final
+// rename operation. The seam permits deterministic cross-platform verification
+// that a failed replacement preserves the original accounts file.
+//
+// Parameters:
+//   - path: absolute filesystem path to the accounts JSON file.
+//   - accounts: the account configurations to persist.
+//   - rename: final atomic replacement operation.
+//
+// Returns an error from serialization, temporary-file I/O, or replacement.
+// Side effects match [SaveAccounts]; failed replacements remove the temporary
+// file and leave any existing target untouched.
+func saveAccountsWithRename(path string, accounts []AccountConfig, rename func(string, string) error) error {
+	file := AccountsFile{SchemaVersion: CurrentAccountsSchemaVersion, Accounts: accounts}
 
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
@@ -139,7 +167,7 @@ func SaveAccounts(path string, accounts []AccountConfig) error {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup on rename failure
 		return fmt.Errorf("rename temp file: %w", err)
 	}

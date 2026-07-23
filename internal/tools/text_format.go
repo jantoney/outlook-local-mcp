@@ -829,19 +829,18 @@ func FormatStatusText(status statusResponse) string {
 	if status.Config.Features.ReadOnly {
 		readOnly = "on"
 	}
-	mail := "off"
-	if status.Config.Features.MailEnabled {
-		mail = "on"
+	webUI := "off"
+	if status.Config.Features.WebUIURL != "" {
+		webUI = status.Config.Features.WebUIURL
+	} else if status.Config.Features.WebUIEnabled {
+		webUI = "unavailable"
 	}
-	mailManage := "off"
-	if status.Config.Features.MailManageEnabled {
-		mailManage = "on"
+	fmt.Fprintf(&b, "\nFeatures: read-only=%s, web-ui=%s, provenance=%s", readOnly, webUI, status.Config.Features.ProvenanceTag)
+	if status.Broker.Role != "" {
+		fmt.Fprintf(&b, "\nBroker: role=%s, pid=%d, clients=%d, ui-owner=%t, instance=%s, state=%s",
+			status.Broker.Role, status.Broker.PID, status.Broker.Clients, status.Broker.UIOwner,
+			status.Broker.InstanceFingerprint, status.Broker.StateFingerprint)
 	}
-	mailSend := "off"
-	if status.Config.Features.MailSendEnabled {
-		mailSend = "on"
-	}
-	fmt.Fprintf(&b, "\nFeatures: read-only=%s, mail=%s, mail-manage=%s, provenance=%s, mail-send=%s", readOnly, mail, mailManage, status.Config.Features.ProvenanceTag, mailSend)
 
 	return b.String()
 }

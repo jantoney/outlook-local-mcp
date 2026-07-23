@@ -42,9 +42,5 @@ func ScopesForAccountEntry(entry *AccountEntry) []string {
 	if entry == nil {
 		return nil
 	}
-	return OAuthScopeUnion(
-		ScopesForMailPolicy(entry.MailPolicy),
-		ScopesForCalendarAliases(entry.CalendarAliases),
-		ScopesForMailAliases(entry.MailAliases),
-	)
+	return RequiredScopes(entry.CalendarPolicy, entry.MailPolicy, entry.CalendarAliases, entry.MailAliases)
 }

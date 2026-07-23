@@ -82,6 +82,9 @@ func resolveLocaltimeSymlink(path string) string {
 		target = filepath.Join(filepath.Dir(path), target)
 	}
 	target = filepath.Clean(target)
+	// Symlink targets use the host separator. Normalize before searching so
+	// the extraction helper remains testable and correct across platforms.
+	target = filepath.ToSlash(target)
 
 	const marker = "zoneinfo/"
 	idx := strings.Index(target, marker)

@@ -49,6 +49,10 @@ type CalendarAlias struct {
 	MountedCalendarID string `json:"mounted_calendar_id,omitempty"`
 	// Profile is the target-local off, read, or manage authorization level.
 	Profile CalendarProfile `json:"profile"`
+
+	// Validation is the latest direct Graph reachability result. Operations
+	// fail closed unless its status is available.
+	Validation Validation `json:"validation"`
 }
 
 // NewOwnerPrimaryCalendar creates and validates an organizational owner-view

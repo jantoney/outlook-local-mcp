@@ -24,10 +24,11 @@ For full setup instructions including Claude Desktop and Claude Code configurati
 
 - **Calendar management** -- list, search, create, update, delete, and respond to events; create and cancel meetings with attendee confirmation
 - **Multi-account support** -- manage multiple Microsoft accounts simultaneously with per-account token isolation and lifecycle control (`add`, `remove`, `login`, `logout`, `refresh`)
-- **Lazy authentication** -- authenticates on first tool call; device code, browser, and authorization code flows supported
+- **Explicit authentication** -- process-bound device code, browser, and authorization code sessions per account
 - **Persistent token cache** -- OS-native secure storage (macOS Keychain, Linux libsecret, Windows DPAPI) with AES-256-GCM file fallback
-- **Mail read access** (opt-in, `MAIL_ENABLED=true`) -- list folders, list and search messages, read conversations and attachments using KQL full-text search
-- **Mail draft management** (opt-in, `MAIL_MANAGE_ENABLED=true`) -- compose new drafts, reply drafts, and forward drafts that land in Outlook Drafts for manual review and send; email is never sent automatically
+- **Granular account permissions** -- independent own-calendar and own-mail actions with deterministic least-privilege scopes
+- **Validated shared resources** -- manual/discovered calendars and mailboxes fail closed until direct Graph metadata validation succeeds
+- **Optional local web UI** -- embedded loopback-only account and permission management on port 8155 by default
 - **Read-only mode** -- disable all writes via `READ_ONLY=true`
 - **In-server documentation access** -- the LLM can look up docs and troubleshoot without leaving the session (see below)
 - **MCP tool annotations** -- full annotation set for Anthropic Software Directory compliance
@@ -79,8 +80,8 @@ All settings use environment variables prefixed with `OUTLOOK_MCP_`. Key variabl
 | `DEFAULT_TIMEZONE` | `auto` | IANA timezone for calendar operations |
 | `TOKEN_STORAGE` | `auto` | `auto`, `keychain`, or `file` |
 | `READ_ONLY` | `false` | Disable write operations |
-| `MAIL_ENABLED` | `false` | Enable read-only mail access |
-| `MAIL_MANAGE_ENABLED` | `false` | Enable mail draft management (implies `MAIL_ENABLED`) |
+| `WEB_UI_ENABLED` | `false` | Enable embedded account administration UI |
+| `WEB_UI_PORT` | `8155` | IPv4-loopback UI port |
 | `LOG_LEVEL` | `warn` | `debug`, `info`, `warn`, `error` |
 | `LOG_FILE` | *(disabled)* | File path for persistent log output |
 
@@ -88,7 +89,7 @@ Full configuration reference is in [docs/reference/architecture.md](docs/referen
 
 ## Troubleshooting
 
-Common issues including authentication failures, token refresh, Keychain errors, Graph throttling, and mail flag configuration are covered in [docs/troubleshooting.md](docs/troubleshooting.md). The LLM can retrieve this guide directly with `{tool: "system", args: {operation: "get_docs", slug: "troubleshooting"}}`.
+Common issues including authentication failures, token refresh, Keychain errors, Graph throttling, local UI startup, and shared-resource validation are covered in [docs/troubleshooting.md](docs/troubleshooting.md). The LLM can retrieve this guide directly with `{tool: "system", args: {operation: "get_docs", slug: "troubleshooting"}}`.
 
 ## Contributing
 

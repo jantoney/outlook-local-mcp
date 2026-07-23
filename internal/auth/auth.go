@@ -19,11 +19,6 @@ import (
 // userReadScope permits resolving the signed-in account through Graph /me.
 const userReadScope = "User.Read"
 
-// calendarScope is the OAuth scope requested for Microsoft Graph calendar
-// operations. The azidentity library automatically includes offline_access
-// to obtain a refresh token.
-const calendarScope = "Calendars.ReadWrite"
-
 // mailScope is the OAuth scope requested for read-only Microsoft Graph mail
 // operations. It is only included when MailEnabled is true in the config and
 // MailManageEnabled is false.
@@ -323,6 +318,25 @@ type deviceCodeMsgKeyType struct{}
 // back, allowing callers to present it to the user.
 var DeviceCodeMsgKey = deviceCodeMsgKeyType{}
 
+// DeviceCodeDetails contains the structured, user-facing values required to
+// complete device-code authentication. It never contains an access token.
+type DeviceCodeDetails struct {
+	// VerificationURL is the Microsoft page the user must open.
+	VerificationURL string
+	// UserCode is the short-lived code the user enters on that page.
+	UserCode string
+	// Message is the provider's complete display instruction.
+	Message string
+}
+
+// deviceCodeDetailsKeyType prevents collisions with unrelated context values.
+type deviceCodeDetailsKeyType struct{}
+
+// DeviceCodeDetailsKey is the context key for an optional channel receiving
+// structured device-code instructions. Existing string prompt consumers remain
+// supported through DeviceCodeMsgKey.
+var DeviceCodeDetailsKey = deviceCodeDetailsKeyType{}
+
 // deviceCodeUserPrompt is the UserPrompt callback used by DeviceCodeCredential.
 // It attempts to send the device code message as a LoggingMessageNotification
 // via the MCPServer found in ctx (populated by AuthMiddleware's mergedContext
@@ -341,6 +355,16 @@ var DeviceCodeMsgKey = deviceCodeMsgKeyType{}
 // Returns nil on success. Returns an error only if stderr writing fails (which
 // is unlikely and non-fatal).
 func deviceCodeUserPrompt(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
+	if ch, ok := ctx.Value(DeviceCodeDetailsKey).(chan DeviceCodeDetails); ok {
+		select {
+		case ch <- DeviceCodeDetails{
+			VerificationURL: msg.VerificationURL,
+			UserCode:        msg.UserCode,
+			Message:         msg.Message,
+		}:
+		default:
+		}
+	}
 	// Forward to middleware channel if available, so the device code
 	// message can be returned as a tool result visible in the chat.
 	if ch, ok := ctx.Value(DeviceCodeMsgKey).(chan string); ok {

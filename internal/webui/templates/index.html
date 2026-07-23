@@ -1,0 +1,208 @@
+{{define "index.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outlook MCP accounts</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">OUTLOOK LOCAL MCP</p>
+        <h1>Accounts and permissions</h1>
+        <p class="lede">Review local access, required Microsoft Graph scopes, and authentication state.</p>
+      </div>
+      <span class="local-only">● Local only · {{.BaseURL}}</span>
+    </header>
+
+    {{if .ReadOnly}}<div class="notice warning" role="status"><strong>Read-only mode.</strong> Account lifecycle and authentication remain available; permission and alias changes are disabled.</div>{{end}}
+    {{if .Notice}}<div class="notice success" role="status">{{.Notice}}</div>{{end}}
+    {{if .Problem}}<div class="notice error" role="alert">{{.Problem}}</div>{{end}}
+
+    {{if .Session}}
+    <section class="auth-panel" data-session-id="{{.Session.ID}}" aria-live="polite">
+      <div>
+        <p class="eyebrow">AUTHENTICATION · {{.Session.Label}}</p>
+        <h2 id="auth-state">{{.Session.State}}</h2>
+        <p id="auth-prompt">{{.Session.Prompt}}</p>
+        <div class="auth-instructions" id="auth-instructions" {{if not (or .Session.AuthURL .Session.VerificationURL .Session.UserCode)}}hidden{{end}}>
+          <div class="copy-row" id="auth-link-row" {{if not (or .Session.AuthURL .Session.VerificationURL)}}hidden{{end}}><a id="auth-link" href="{{if .Session.AuthURL}}{{.Session.AuthURL}}{{else}}{{.Session.VerificationURL}}{{end}}" target="_blank" rel="noreferrer">Open Microsoft sign-in</a><button class="button compact ghost" type="button" data-copy-value="{{if .Session.AuthURL}}{{.Session.AuthURL}}{{else}}{{.Session.VerificationURL}}{{end}}">Copy link</button></div>
+          <div class="copy-row" id="auth-code-row" {{if not .Session.UserCode}}hidden{{end}}><code id="auth-code">{{.Session.UserCode}}</code><button class="button compact ghost" type="button" data-copy-value="{{.Session.UserCode}}">Copy code</button></div>
+        </div>
+        {{if .Session.Error}}<p class="inline-error" id="auth-error">{{.Session.Error}}</p>{{else}}<p class="inline-error" id="auth-error" hidden></p>{{end}}
+      </div>
+      {{if eq .Session.State "awaiting_code"}}
+      <form method="post" action="/auth/{{.Session.ID}}/complete" class="code-form">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <label for="redirect-url">Full redirect URL</label>
+        <input id="redirect-url" name="redirect_url" type="url" required autocomplete="off" placeholder="https://login.microsoftonline.com/…">
+        <button class="button primary" type="submit">Complete authentication</button>
+      </form>
+      {{end}}
+      <form id="auth-retry" method="post" action="/accounts/{{.Session.Label}}/reauth" {{if not (or .Session.UserCode (eq .Session.State "failed"))}}hidden{{end}}><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="restart_session" value="{{.Session.ID}}"><button class="button primary" type="submit">Get a new sign-in code</button></form>
+      <form method="post" action="/auth/{{.Session.ID}}/cancel">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <button class="button ghost" type="submit">Cancel</button>
+      </form>
+    </section>
+    {{end}}
+
+    <section class="section-heading">
+      <div><p class="eyebrow">CONNECTED IDENTITIES</p><h2>{{len .Accounts}} accounts</h2></div>
+      <p>Permission changes save immediately. Re-authenticate only when the required scope set changes.</p>
+    </section>
+
+    <div class="account-list">
+    {{range .Accounts}}
+      {{$account := .}}
+      <details class="account-card" data-account-label="{{.Label}}" data-detail-key="account:{{.Label}}" {{if .ReauthenticationRequired}}open{{end}}>
+        <summary>
+          <span class="account-identity"><span class="avatar">{{slice .Label 0 1}}</span><span><strong>{{.Label}}</strong><small>{{if .UPN}}{{.UPN}}{{else}}UPN available after authentication{{end}}</small></span></span>
+          <span class="status-group">
+            {{if .ReauthenticationRequired}}<span class="badge warning">Re-authentication required</span>{{else if .Authenticated}}<span class="badge success">Connected</span>{{else}}<span class="badge neutral">Disconnected</span>{{end}}
+            <span class="chevron" aria-hidden="true">⌄</span>
+          </span>
+        </summary>
+        <div class="account-body">
+          <dl class="identity-grid">
+            <div><dt>Client ID</dt><dd>{{.ClientID}}</dd></div>
+            <div><dt>Tenant</dt><dd>{{.TenantID}}</dd></div>
+            <div><dt>Authentication</dt><dd>{{.AuthMethod}}</dd></div>
+            <div><dt>Account ID</dt><dd>{{.AccountID}}</dd></div>
+          </dl>
+
+          <form class="permission-form autosave" method="post" action="/accounts/{{.Label}}/permissions">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <div class="permission-section">
+              <div><h3>Own calendar</h3><p>Choose the least access this account needs.</p></div>
+              <div class="radio-row">
+                <label><input type="radio" name="calendar_policy" value="off" {{if eq .CalendarPolicy "off"}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}><span><strong>Off</strong><small>No calendar scope</small></span></label>
+                <label><input type="radio" name="calendar_policy" value="read" {{if eq .CalendarPolicy "read"}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}><span><strong>Read</strong><small>Calendars.Read</small></span></label>
+                <label><input type="radio" name="calendar_policy" value="manage" {{if eq .CalendarPolicy "manage"}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}><span><strong>Manage</strong><small>Calendars.ReadWrite</small></span></label>
+              </div>
+            </div>
+            <div class="permission-section">
+              <div><h3>Own mail</h3><p>Actions are independent and enforced locally.</p></div>
+              <div class="check-grid">
+                <label><input type="checkbox" name="mail_read" {{if .MailPolicy.Read}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Read mail</label>
+                <label><input type="checkbox" name="mail_draft" {{if .MailPolicy.Draft}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Manage drafts</label>
+                <label><input type="checkbox" name="mail_move" {{if .MailPolicy.Move}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Move</label>
+                <label><input type="checkbox" name="mail_archive" {{if .MailPolicy.Archive}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Archive</label>
+                <label><input type="checkbox" name="mail_trash" {{if .MailPolicy.Trash}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Trash</label>
+                <label><input type="checkbox" name="mail_restore" {{if .MailPolicy.Restore}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Restore</label>
+                <label><input type="checkbox" name="mail_permanent_delete" {{if .MailPolicy.PermanentDelete}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Permanent delete</label>
+                <label><input type="checkbox" name="mail_send" {{if .MailPolicy.Send}}checked{{end}} {{if $.ReadOnly}}disabled{{end}}>Send</label>
+              </div>
+            </div>
+            <p class="save-state" aria-live="polite">Changes save automatically.</p>
+          </form>
+
+          <div class="scope-grid">
+            <div><h3>Active session scopes</h3>{{if .ActiveScopes}}<ul class="scope-list">{{range .ActiveScopes}}<li>{{.}}</li>{{end}}</ul>{{else}}<p class="empty">No active authenticated session.</p>{{end}}</div>
+            <div><h3>Required scopes</h3><ul class="scope-list required">{{range .RequiredScopes}}<li>{{.}}</li>{{end}}</ul></div>
+          </div>
+
+          <div class="shared-summary">
+            <div><strong>{{len .CalendarAliases}}</strong><span>shared calendars</span></div>
+            <div><strong>{{len .MailAliases}}</strong><span>shared mailboxes</span></div>
+          </div>
+
+          <details class="shared-resources" data-detail-key="shared:{{.Label}}" data-refresh-on-open>
+            <summary><span><strong>Shared resources</strong><small>Discovery, manual entry, permissions, and direct Graph validation</small></span><span>Configure</span></summary>
+            <div class="shared-body">
+              <form method="post" action="/accounts/{{.Label}}/shared/refresh" class="refresh-row" data-refresh-form>
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <div><strong>Discover and validate</strong><p>Lists mounted calendars and revalidates configured calendars and mailboxes without reading events or messages.</p></div>
+                <span class="refresh-actions"><span class="refresh-state" aria-live="polite"></span><button class="button secondary" type="submit" {{if not .Authenticated}}disabled{{end}}>Refresh</button></span>
+              </form>
+              {{if .CalendarCandidates}}
+              <div class="candidate-list">
+                <h4>Discovered calendars</h4>
+                {{range .CalendarCandidates}}
+                <details class="candidate" data-detail-key="candidate:{{$account.Label}}:{{calendarAlias .Name}}">
+                  <summary><span><strong>{{.Name}}</strong><small>{{if .Owner}}{{.Owner}}{{else}}Owner not reported{{end}}</small></span>{{if .CanEdit}}<span class="badge success">Editable</span>{{end}}<span class="candidate-action">Add</span></summary>
+                  <form method="post" action="/accounts/{{$account.Label}}/calendars">
+                    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                    <input type="hidden" name="alias" value="{{calendarAlias .Name}}">
+                    <input type="hidden" name="owner" value="{{if .Owner}}{{.Owner}}{{else if $account.UPN}}{{$account.UPN}}{{else}}{{$account.Label}}{{end}}">
+                    <input type="hidden" name="kind" value="mounted_calendar">
+                    <input type="hidden" name="mounted_id" value="{{.ID}}">
+                    <fieldset><legend>Permission</legend><div class="compact-options"><label><input type="radio" name="profile" value="off" checked>Off</label><label><input type="radio" name="profile" value="read">Read</label>{{if .CanEdit}}<label><input type="radio" name="profile" value="manage">Manage</label>{{end}}</div></fieldset>
+                    <button class="button primary compact" type="submit">Add {{.Name}}</button>
+                  </form>
+                </details>
+                {{end}}
+              </div>
+              {{end}}
+
+              <div class="resource-columns">
+                <section>
+                  <h3>Shared calendars</h3>
+                  {{range .CalendarAliases}}
+                  <div class="resource-row">
+                    <div><strong>{{.Alias}}</strong><small>{{.Owner}} · {{.Kind}}</small><span class="validation {{.Validation.Status}}">{{.Validation.Status}}{{if .Validation.Message}} · {{.Validation.Message}}{{end}}</span></div>
+                    <form class="inline-form autosave" method="post" action="/accounts/{{$account.Label}}/calendars/{{.Alias}}/profile"><input type="hidden" name="csrf" value="{{$.CSRF}}"><select name="profile" {{if $.ReadOnly}}disabled{{end}}><option value="off" {{if eq .Profile "off"}}selected{{end}}>Off</option><option value="read" {{if eq .Profile "read"}}selected{{end}}>Read</option>{{if eq .Kind "mounted_calendar"}}<option value="manage" {{if eq .Profile "manage"}}selected{{end}}>Manage</option>{{end}}</select><span class="save-state"></span></form>
+                    <form method="post" action="/accounts/{{$account.Label}}/shared/calendar/{{.Alias}}/remove" class="remove-inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input name="confirm_alias" aria-label="Type {{.Alias}} to remove" placeholder="Type {{.Alias}}"><button class="button danger compact" type="submit">Remove</button></form>
+                  </div>
+                  {{else}}<p class="empty">No shared calendars configured.</p>{{end}}
+                  <details class="resource-add" data-detail-key="calendar-manual:{{.Label}}"><summary>Add calendar manually</summary><form method="post" action="/accounts/{{.Label}}/calendars"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Alias<input name="alias" required maxlength="64"><small class="field-help">Spaces and punctuation are converted to a safe local alias.</small></label><label>Owner email / UPN<input name="owner" type="text" required></label><label>Kind<select name="kind"><option value="mounted_calendar">Mounted calendar</option><option value="owner_primary_calendar">Owner primary (read-only)</option></select></label><label>Mounted calendar ID<input name="mounted_id" list="calendar-{{.Label}}" placeholder="Required for mounted"><small class="field-help">Use Refresh first; discovered mounted calendars appear in this field. If discovery misses one, run <code>GET /me/calendars</code> in Microsoft Graph Explorer as this signed-in account and copy the calendar object’s <code>id</code>. The calendar must already be shared with and added to Outlook.</small></label><datalist id="calendar-{{.Label}}">{{range .CalendarCandidates}}<option value="{{.ID}}">{{.Name}} — {{.Owner}}</option>{{end}}</datalist><label>Permission<select name="profile"><option value="off">Off</option><option value="read">Read</option><option value="manage">Manage (mounted only)</option></select></label><button class="button secondary" type="submit">Add calendar</button></form></details>
+                </section>
+                <section>
+                  <h3>Shared mailboxes</h3>
+                  {{range .MailAliases}}
+                  <div class="resource-row">
+                    <div><strong>{{.Alias}}</strong><small>{{.Owner}}</small><span class="validation {{.Validation.Status}}">{{.Validation.Status}}{{if .Validation.Message}} · {{.Validation.Message}}{{end}}</span></div>
+                    <form class="shared-mail-policy autosave" method="post" action="/accounts/{{$account.Label}}/mailboxes/{{.Alias}}/policy"><input type="hidden" name="csrf" value="{{$.CSRF}}"><div class="mini-checks"><label><input type="checkbox" name="mail_read" {{if .Policy.Read}}checked{{end}}>Read</label><label><input type="checkbox" name="mail_draft" {{if .Policy.Draft}}checked{{end}}>Draft</label><label><input type="checkbox" name="mail_move" {{if .Policy.Move}}checked{{end}}>Move</label><label><input type="checkbox" name="mail_archive" {{if .Policy.Archive}}checked{{end}}>Archive</label><label><input type="checkbox" name="mail_trash" {{if .Policy.Trash}}checked{{end}}>Trash</label><label><input type="checkbox" name="mail_restore" {{if .Policy.Restore}}checked{{end}}>Restore</label><label><input type="checkbox" name="mail_permanent_delete" {{if .Policy.PermanentDelete}}checked{{end}}>Delete</label><label><input type="checkbox" name="mail_send" {{if .Policy.Send}}checked{{end}}>Send</label></div><span class="save-state"></span></form>
+                    <form method="post" action="/accounts/{{$account.Label}}/shared/mail/{{.Alias}}/remove" class="remove-inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input name="confirm_alias" aria-label="Type {{.Alias}} to remove" placeholder="Type {{.Alias}}"><button class="button danger compact" type="submit">Remove</button></form>
+                  </div>
+                  {{else}}<p class="empty">No shared mailboxes configured.</p>{{end}}
+                  <details class="resource-add"><summary>Add mailbox manually</summary><form method="post" action="/accounts/{{.Label}}/mailboxes"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Alias<input name="alias" required pattern="[a-zA-Z0-9_-]{1,64}"></label><label>Owner email / UPN<input name="owner" type="text" required></label><button class="button secondary" type="submit">Add mailbox with actions off</button></form></details>
+                </section>
+              </div>
+            </div>
+          </details>
+
+          <div class="actions">
+            <form method="post" action="/accounts/{{.Label}}/reauth"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="button primary" type="submit">{{if .Authenticated}}Re-authenticate{{else}}Authenticate{{end}}</button></form>
+            {{if .Authenticated}}<form method="post" action="/accounts/{{.Label}}/logout"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="button secondary" type="submit">Disconnect</button></form>{{end}}
+          </div>
+
+          <details class="danger-zone" data-detail-key="danger:{{.Label}}">
+            <summary>Remove account</summary>
+            <form method="post" action="/accounts/{{.Label}}/remove">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <label>Type <strong>{{.Label}}</strong> to confirm<input name="confirm_label" required autocomplete="off"></label>
+              <button class="button danger" type="submit">Remove account</button>
+            </form>
+          </details>
+        </div>
+      </details>
+    {{else}}
+      <div class="empty-state"><span class="empty-icon">＋</span><h2>No accounts configured</h2><p>Add an account below. Nothing authenticates until you review permissions and choose Authenticate.</p></div>
+    {{end}}
+    </div>
+
+    <details class="add-account" data-detail-key="add-account" {{if not .Accounts}}open{{end}}>
+      <summary><span><strong>Add account</strong><small>Configure identity and least-privilege access before authentication.</small></span><span>＋</span></summary>
+      <form method="post" action="/accounts">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <div class="field-grid">
+          <label>Label<input name="label" required pattern="[a-zA-Z0-9_-]{1,64}" placeholder="work" autocomplete="off"></label>
+          <label>Authentication<select name="auth_method"><option value="browser" {{if eq .DefaultAuthMethod "browser"}}selected{{end}}>Browser</option><option value="device_code" {{if eq .DefaultAuthMethod "device_code"}}selected{{end}}>Device code</option><option value="auth_code" {{if eq .DefaultAuthMethod "auth_code"}}selected{{end}}>Authorization code</option></select></label>
+          <label>Client ID<input name="client_id" value="{{.DefaultClientID}}" required autocomplete="off"></label>
+          <label>Tenant ID<input name="tenant_id" value="{{.DefaultTenantID}}" required autocomplete="off"></label>
+        </div>
+        <fieldset><legend>Initial own-calendar access</legend><div class="radio-row"><label><input type="radio" name="calendar_policy" value="off" checked><span><strong>Off</strong><small>Recommended default</small></span></label><label><input type="radio" name="calendar_policy" value="read"><span><strong>Read</strong><small>Read events</small></span></label><label><input type="radio" name="calendar_policy" value="manage"><span><strong>Manage</strong><small>Create and change</small></span></label></div></fieldset>
+        <p class="helper">Own-mail and shared-resource access start off. Add the account, review its card, then authenticate.</p>
+        <button class="button primary" type="submit">Add configured account</button>
+      </form>
+    </details>
+    <footer>This interface listens only on IPv4 loopback and stops with the MCP process. Microsoft consent is not automatically revoked when local permissions change.</footer>
+  </main>
+</body>
+</html>
+{{end}}

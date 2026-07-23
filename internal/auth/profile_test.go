@@ -78,10 +78,10 @@ func TestScopesForProfile(t *testing.T) {
 		profile MailProfile
 		want    []string
 	}{
-		{"calendar only", MailProfileCalendarOnly, []string{"User.Read", "Calendars.ReadWrite"}},
-		{"mail read", MailProfileRead, []string{"User.Read", "Calendars.ReadWrite", "Mail.Read"}},
-		{"mail manage", MailProfileManage, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite"}},
-		{"mail send", MailProfileSend, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite", "Mail.Send"}},
+		{"calendar only", MailProfileCalendarOnly, nil},
+		{"mail read", MailProfileRead, []string{"Mail.Read"}},
+		{"mail manage", MailProfileManage, []string{"Mail.ReadWrite"}},
+		{"mail send", MailProfileSend, []string{"Mail.ReadWrite", "Mail.Send"}},
 	}
 
 	for _, tt := range tests {
@@ -110,11 +110,11 @@ func TestScopesForMailPolicy(t *testing.T) {
 		policy MailActionPolicy
 		want   []string
 	}{
-		{"disabled", MailActionPolicy{}, []string{"User.Read", "Calendars.ReadWrite"}},
-		{"read", MailActionPolicy{Read: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.Read"}},
-		{"draft", MailActionPolicy{Draft: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite"}},
-		{"filing", MailActionPolicy{Archive: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite"}},
-		{"send", MailActionPolicy{Send: true}, []string{"User.Read", "Calendars.ReadWrite", "Mail.ReadWrite", "Mail.Send"}},
+		{"disabled", MailActionPolicy{}, nil},
+		{"read", MailActionPolicy{Read: true}, []string{"Mail.Read"}},
+		{"draft", MailActionPolicy{Draft: true}, []string{"Mail.ReadWrite"}},
+		{"filing", MailActionPolicy{Archive: true}, []string{"Mail.ReadWrite"}},
+		{"send", MailActionPolicy{Send: true}, []string{"Mail.ReadWrite", "Mail.Send"}},
 	}
 
 	for _, test := range tests {

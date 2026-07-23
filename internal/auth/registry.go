@@ -56,6 +56,13 @@ type AccountEntry struct {
 	// so the account can be reconstructed after a server restart.
 	AuthMethod string
 
+	// CalendarPolicy controls access to the account's own calendar.
+	CalendarPolicy CalendarPolicy
+
+	// ReauthenticationRequired indicates that configured required scopes differ
+	// from the active authenticated session and operations must fail closed.
+	ReauthenticationRequired bool
+
 	// MailProfile controls the mail scopes and verbs available to this account.
 	// It is retained as a transition input; runtime authorization uses MailPolicy.
 	MailProfile MailProfile

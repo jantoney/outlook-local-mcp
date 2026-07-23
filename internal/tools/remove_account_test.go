@@ -187,6 +187,7 @@ func TestHandleRemoveAccount_CleansUpConfig(t *testing.T) {
 func TestRemoveAccount_ClearsTokenCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	cacheDir := filepath.Join(home, ".outlook-local-mcp")
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
@@ -346,6 +347,17 @@ func TestRemoveAccount_AtomicWrite_NoPartialFileOnError(t *testing.T) {
 		t.Fatalf("Chmod: %v", err)
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o700) }) //nolint:errcheck // cleanup
+
+	// Windows and privileged POSIX users may still create files after chmod.
+	// Detect that capability directly so this permission-based integration test
+	// does not mistake an unenforced fixture for a production atomicity failure.
+	probe, probeErr := os.CreateTemp(dir, "write-probe-*")
+	if probeErr == nil {
+		probePath := probe.Name()
+		probe.Close()        //nolint:errcheck // best-effort cleanup before skip
+		os.Remove(probePath) //nolint:errcheck // best-effort cleanup before skip
+		t.Skip("filesystem does not enforce the read-only directory fixture; atomic replacement failure is covered portably in auth.TestSaveAccountsRenameFailurePreservesOriginal")
+	}
 
 	registry := auth.NewAccountRegistry()
 	if err := registry.Add(&auth.AccountEntry{Label: "alpha"}); err != nil {

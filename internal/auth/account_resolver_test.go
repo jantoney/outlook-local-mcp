@@ -285,32 +285,19 @@ func TestAccountResolver_ElicitationCancel(t *testing.T) {
 // errors), the middleware falls back to the "default" account.
 func TestAccountResolver_ElicitationNotSupported(t *testing.T) {
 	reg := newTestRegistry("default", "personal")
-	defaultEntry, _ := reg.Get("default")
-
 	elicit := func(_ context.Context, _ mcp.ElicitationRequest) (*mcp.ElicitationResult, error) {
 		return nil, mcpserver.ErrElicitationNotSupported
 	}
 
-	var resolvedClient *msgraphsdk.GraphServiceClient
 	state := newTestResolverState(reg, elicit)
-	handler := state.middleware(func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		client, ok := GraphClientFromContext(ctx)
-		if !ok {
-			t.Fatal("no client in context")
-		}
-		resolvedClient = client
-		return mcp.NewToolResultText("ok"), nil
-	})
+	handler := state.middleware(passthrough)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected tool error: %v", result)
-	}
-	if resolvedClient != defaultEntry.Client {
-		t.Error("resolved client does not match expected 'default' account")
+	if !result.IsError {
+		t.Fatal("expected explicit-selection tool error")
 	}
 }
 
@@ -453,38 +440,24 @@ func TestInferAuthMethod_NilAuthenticator(t *testing.T) {
 	}
 }
 
-// TestElicitAccountSelection_AnyError_FallsBackToDefault verifies that any
-// elicitation error (not just ErrElicitationNotSupported) triggers fallback
-// to the "default" account. This covers Claude Desktop's "Method not found"
-// JSON-RPC error.
-func TestElicitAccountSelection_AnyError_FallsBackToDefault(t *testing.T) {
+// TestElicitAccountSelection_AnyErrorRequiresExplicitSelection verifies that
+// provider failures never silently choose an account.
+func TestElicitAccountSelection_AnyErrorRequiresExplicitSelection(t *testing.T) {
 	reg := newTestRegistry("default", "personal")
-	defaultEntry, _ := reg.Get("default")
 
 	elicit := func(_ context.Context, _ mcp.ElicitationRequest) (*mcp.ElicitationResult, error) {
 		return nil, fmt.Errorf("elicitation request failed: Method not found")
 	}
 
-	var resolvedClient *msgraphsdk.GraphServiceClient
 	state := newTestResolverState(reg, elicit)
-	handler := state.middleware(func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		client, ok := GraphClientFromContext(ctx)
-		if !ok {
-			t.Fatal("no client in context")
-		}
-		resolvedClient = client
-		return mcp.NewToolResultText("ok"), nil
-	})
+	handler := state.middleware(passthrough)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected tool error: %v", result)
-	}
-	if resolvedClient != defaultEntry.Client {
-		t.Error("resolved client does not match expected 'default' account")
+	if !result.IsError {
+		t.Fatal("expected explicit-selection tool error")
 	}
 }
 

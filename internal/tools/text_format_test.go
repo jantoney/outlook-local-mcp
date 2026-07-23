@@ -533,7 +533,8 @@ func TestFormatStatusText(t *testing.T) {
 		Config: statusConfig{
 			Features: statusConfigFeatures{
 				ReadOnly:      false,
-				MailEnabled:   true,
+				WebUIEnabled:  true,
+				WebUIURL:      "http://127.0.0.1:8155",
 				ProvenanceTag: "mcp_created",
 			},
 		},
@@ -556,7 +557,7 @@ func TestFormatStatusText(t *testing.T) {
 	if !strings.Contains(result, "personal: disconnected") {
 		t.Error("expected personal account with disconnected state")
 	}
-	if !strings.Contains(result, "Features: read-only=off, mail=on, mail-manage=off, provenance=mcp_created") {
+	if !strings.Contains(result, "Features: read-only=off, web-ui=http://127.0.0.1:8155, provenance=mcp_created") {
 		t.Error("expected features line")
 	}
 }

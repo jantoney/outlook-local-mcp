@@ -116,11 +116,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 		profile := auth.LegacyProfileForPolicy(mailPolicy)
 		calendarAliases := loginCalendarAliases(entry, cfg)
 		mailAliases := loginMailAliases(entry, cfg)
-		scopes := auth.OAuthScopeUnion(
-			s.selectedScopes(profile),
-			auth.ScopesForCalendarAliases(calendarAliases),
-			auth.ScopesForMailAliases(mailAliases),
-		)
+		scopes := auth.RequiredScopes(entry.CalendarPolicy, mailPolicy, calendarAliases, mailAliases)
 
 		clientID := entry.ClientID
 		if clientID == "" {
@@ -185,6 +181,10 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Graph client for account %q: %s", label, err.Error())), nil
 		}
 
+		// This legacy handler is retained for direct callers; production account
+		// login uses accountadmin and persists transactionally. Tests and embedded
+		// callers may hold registry-only accounts with no accounts.json record.
+		_ = auth.SetAccountReauthenticationRequired(cfg.AccountsPath, label, false)
 		if err := registry.Update(label, func(e *auth.AccountEntry) {
 			e.ClientID = clientID
 			e.TenantID = tenantID
@@ -195,7 +195,7 @@ func handleLoginAccount(s *addAccountState, registry *auth.AccountRegistry, cfg 
 			e.AuthRecordPath = authRecordPath
 			e.CacheName = cacheName
 			e.Authenticated = true
-			e.MailProfile = profile
+			e.ReauthenticationRequired = false
 			e.MailPolicy = mailPolicy
 			e.Scopes = append([]string(nil), scopes...)
 			e.TokenTenantContext = auth.TokenTenantContextFromAuthState(authMethod, authRecordPath)

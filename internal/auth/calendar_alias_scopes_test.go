@@ -19,6 +19,7 @@ func TestScopesForAccountConfig(t *testing.T) {
 		{Profile: resource.CalendarProfileRead},
 	}
 	account := AccountConfig{
+		CalendarPolicy:  func() *CalendarPolicy { p := CalendarPolicyManage; return &p }(),
 		MailPolicy:      &policy,
 		CalendarAliases: &aliases,
 	}

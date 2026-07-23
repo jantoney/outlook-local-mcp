@@ -133,6 +133,7 @@ func TestFileCache_CorruptionRecovery(t *testing.T) {
 // TestFileCache_Permissions verifies that the cache file is created with
 // restrictive permissions (0600 - owner read/write only).
 func TestFileCache_Permissions(t *testing.T) {
+	requirePOSIXModeBits(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.bin")
 

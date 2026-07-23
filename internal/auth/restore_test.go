@@ -488,8 +488,8 @@ func TestAuthRecordDir(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"/home/user/.outlook-local-mcp/auth_record.json", "/home/user/.outlook-local-mcp"},
-		{"/tmp/test/auth.json", "/tmp/test"},
+		{filepath.FromSlash("/home/user/.outlook-local-mcp/auth_record.json"), filepath.FromSlash("/home/user/.outlook-local-mcp")},
+		{filepath.FromSlash("/tmp/test/auth.json"), filepath.FromSlash("/tmp/test")},
 	}
 
 	for _, tc := range cases {

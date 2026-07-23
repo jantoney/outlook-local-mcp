@@ -1,11 +1,41 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestSaveAccountsRenameFailurePreservesOriginal verifies the atomic writer's
+// failure path without relying on platform-specific directory permissions.
+func TestSaveAccountsRenameFailurePreservesOriginal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	original := []AccountConfig{{Label: "alpha"}, {Label: "beta"}}
+	if err := SaveAccounts(path, original); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("injected replacement failure")
+	err := saveAccountsWithRename(path, []AccountConfig{{Label: "beta"}}, func(string, string) error { return wantErr })
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("saveAccountsWithRename() error = %v, want injected failure", err)
+	}
+	accounts, loadErr := LoadAccounts(path)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if len(accounts) != 2 || accounts[0].Label != "alpha" || accounts[1].Label != "beta" {
+		t.Fatalf("original accounts changed after failed replacement: %+v", accounts)
+	}
+	leftovers, globErr := filepath.Glob(filepath.Join(filepath.Dir(path), "accounts-*.json.tmp"))
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("temporary files left after failed replacement: %v", leftovers)
+	}
+}
 
 // TestSaveAndLoadAccounts verifies that account configurations survive a
 // round-trip through SaveAccounts and LoadAccounts.

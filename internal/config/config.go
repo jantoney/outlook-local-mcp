@@ -14,6 +14,43 @@ import (
 // The configuration is loaded once at startup via LoadConfig and passed to
 // subsystem initializers (logging, authentication, Graph client, MCP server).
 type Config struct {
+	// BrokerRole is the runtime ownership role exposed by system.status. It is
+	// empty outside an authoritative broker and "broker" inside one.
+	BrokerRole string
+
+	// BrokerInstanceFingerprint identifies compatible executable, state, and
+	// behavior configuration without exposing endpoint credentials.
+	BrokerInstanceFingerprint string
+
+	// BrokerStateFingerprint identifies the mutable persistence realm without
+	// exposing account or authentication paths beyond the storage status group.
+	BrokerStateFingerprint string
+
+	// BrokerPID is the authoritative process identifier for diagnostics.
+	BrokerPID int
+
+	// BrokerClientCount returns the current unexpired stdio proxy lease count.
+	// It is runtime-only and nil before broker initialization.
+	BrokerClientCount func() int
+
+	// BrokerUIOwner reports whether this broker owns the active optional UI.
+	BrokerUIOwner bool
+
+	// WebUIEnabled controls the optional loopback account-management web UI.
+	// It defaults to false and can be overridden by --web-ui.
+	WebUIEnabled bool
+
+	// WebUIPort is the fixed IPv4 loopback port used by the optional web UI.
+	// It defaults to 8155 and can be overridden by --web-ui-port.
+	WebUIPort int
+
+	// WebUIURL is populated at runtime only after the loopback listener binds.
+	WebUIURL string
+
+	// WebUIError describes a non-fatal listener startup failure. The stdio MCP
+	// transport continues when this field is non-empty.
+	WebUIError string
+
 	// ClientID is the OAuth 2.0 client (application) ID used for device code
 	// authentication with Microsoft identity platform. Defaults to the
 	// Microsoft Office first-party client ID.
@@ -224,6 +261,8 @@ func LoadConfig() Config {
 		DefaultTimezone: GetEnv("OUTLOOK_MCP_DEFAULT_TIMEZONE", "auto"),
 		LogLevel:        GetEnv("OUTLOOK_MCP_LOG_LEVEL", "warn"),
 		LogFormat:       GetEnv("OUTLOOK_MCP_LOG_FORMAT", "json"),
+		WebUIEnabled:    strings.EqualFold(GetEnv("OUTLOOK_MCP_WEB_UI_ENABLED", "false"), "true"),
+		WebUIPort:       parseWebUIPort(GetEnv("OUTLOOK_MCP_WEB_UI_PORT", strconv.Itoa(DefaultWebUIPort))),
 	}
 
 	if strings.HasPrefix(cfg.AuthRecordPath, "~/") {
@@ -300,21 +339,6 @@ func LoadConfig() Config {
 	}
 
 	cfg.TokenStorage = GetEnv("OUTLOOK_MCP_TOKEN_STORAGE", "auto")
-
-	cfg.MailEnabled = strings.EqualFold(GetEnv("OUTLOOK_MCP_MAIL_ENABLED", "false"), "true")
-	cfg.MailManageEnabled = strings.EqualFold(GetEnv("OUTLOOK_MCP_MAIL_MANAGE_ENABLED", "false"), "true")
-	cfg.MailSendEnabled = strings.EqualFold(GetEnv("OUTLOOK_MCP_MAIL_SEND_ENABLED", "false"), "true")
-
-	if cfg.MailSendEnabled {
-		cfg.MailManageEnabled = true
-	}
-
-	// Mail management is a superset of read-only mail access. Enabling
-	// MailManageEnabled implicitly enables MailEnabled so that mail tool
-	// registration and scope selection remain consistent.
-	if cfg.MailManageEnabled {
-		cfg.MailEnabled = true
-	}
 
 	maxAttachStr := GetEnv("OUTLOOK_MCP_MAX_ATTACHMENT_SIZE_BYTES", "10485760")
 	maxAttach, err := strconv.ParseInt(maxAttachStr, 10, 64)

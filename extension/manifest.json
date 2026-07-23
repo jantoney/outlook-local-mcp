@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "display_name": "Local Outlook MCP",
   "description": "Manage Microsoft Outlook calendars, events, and email directly from Claude. Runs entirely on your local machine — data stays on your device.",
-  "long_description": "A local MCP server that connects Claude to your Microsoft Outlook account via the Microsoft Graph API.\n\n## Features\n\n- **Calendar management**: list, create, update, delete, cancel, reschedule, and respond to events\n- **Free/busy lookup**: check availability across time ranges\n- **Email access**: list folders, search messages, manage drafts and allowlisted local attachments\n- **Per-account risk profiles**: calendar-only, mail read, draft management, or human-confirmed draft send\n- **Multi-account**: add and switch between multiple Microsoft accounts\n- **Recurrence support**: create and expand recurring events (daily, weekly, monthly, yearly)\n- **Teams integration**: create events with automatic Teams online meeting links\n\n## Privacy & Security\n\n- Runs as a single binary on your machine — no cloud relay, no proxy\n- OAuth tokens stored in your OS keychain (macOS Keychain / Windows Credential Manager)\n- Only connects to Microsoft Graph API with your explicit consent\n- Delegated permissions are selected per account: User.Read, Calendars.ReadWrite, and only the configured Mail.Read, Mail.ReadWrite, or Mail.Send scopes",
+  "long_description": "A local MCP server that connects Claude to Microsoft Outlook through Microsoft Graph.\n\n## Features\n\n- **Calendar and mail operations** with granular per-account policies\n- **Multi-account lifecycle** with process-bound browser, device-code, and authorization-code sessions\n- **Validated shared resources** using exact metadata-only Graph routes\n- **Optional embedded web UI** for local account, permission, authentication, and shared-resource management\n- **Recurrence and Teams support** for calendar workflows\n\n## Privacy & Security\n\n- Runs as a single Go binary on your machine — no cloud relay or proxy\n- Web administration binds only to IPv4 loopback and stops with MCP\n- OAuth tokens are stored in your OS keychain (macOS Keychain / Windows Credential Manager)\n- User.Read is required; calendar, mail, and shared scopes are requested only for explicitly enabled policies",
   "author": {
     "name": "Daniel Grenemark",
     "url": "https://github.com/desek"
@@ -43,9 +43,8 @@
         "OUTLOOK_MCP_TENANT_ID": "${user_config.tenant_id}",
         "OUTLOOK_MCP_AUTH_METHOD": "${user_config.auth_method}",
         "OUTLOOK_MCP_DEFAULT_TIMEZONE": "${user_config.timezone}",
-        "OUTLOOK_MCP_MAIL_ENABLED": "${user_config.mail_enabled}",
-        "OUTLOOK_MCP_MAIL_MANAGE_ENABLED": "${user_config.mail_manage_enabled}",
-        "OUTLOOK_MCP_MAIL_SEND_ENABLED": "${user_config.mail_send_enabled}",
+        "OUTLOOK_MCP_WEB_UI_ENABLED": "${user_config.web_ui_enabled}",
+        "OUTLOOK_MCP_WEB_UI_PORT": "${user_config.web_ui_port}",
         "OUTLOOK_MCP_ATTACHMENT_ROOTS": "${user_config.attachment_roots}"
       },
       "platform_overrides": {
@@ -66,11 +65,11 @@
     },
     {
       "name": "account",
-      "description": "Account management for Microsoft accounts. Required operation: help, add, remove, list, login, logout, refresh, set_mail_policy (independent own-mail actions), and legacy set_mail_profile migration input."
+      "description": "Account management for Microsoft accounts. Configure explicit own-calendar and own-mail permissions, authenticate the deterministic scope union, inspect process-bound auth sessions, manage shared resources, and run observational Graph discovery and direct validation."
     },
     {
       "name": "system",
-      "description": "System diagnostics, authentication utilities, and embedded documentation access. Required operation: help (detailed docs), status (server health, accounts, config), complete_auth (finish auth_code flow — only when auth=auth_code), list_docs (list embedded documentation slugs), search_docs (keyword search across embedded docs), get_docs (fetch full content or a section by slug and anchor)."
+      "description": "Local read-only system diagnostics and embedded documentation access. Required operation: help, status, list_docs, search_docs, or get_docs. Account authentication and auth-code completion are provided by the account domain."
     }
   ],
   "compatibility": {
@@ -105,26 +104,19 @@
       "required": false,
       "default": "auto"
     },
-    "mail_enabled": {
+    "web_ui_enabled": {
       "type": "boolean",
-      "title": "Default Mail Read Access",
-      "description": "Legacy and implicit default mapping that enables the own-mail read action. Explicit new accounts default all actions off.",
+      "title": "Local Account Web UI",
+      "description": "Enable the loopback-only account and permission management page. Disabled by default.",
       "required": false,
       "default": false
     },
-    "mail_manage_enabled": {
-      "type": "boolean",
-      "title": "Default Draft Management",
-      "description": "Legacy and implicit default mapping that enables own-mail read and draft actions.",
+    "web_ui_port": {
+      "type": "number",
+      "title": "Local Account Web UI Port",
+      "description": "IPv4 loopback port for the optional account web UI.",
       "required": false,
-      "default": false
-    },
-    "mail_send_enabled": {
-      "type": "boolean",
-      "title": "Default Confirmed Draft Send",
-      "description": "Legacy and implicit default mapping that enables own-mail read, draft, and human-reviewed send actions.",
-      "required": false,
-      "default": false
+      "default": 8155
     },
     "attachment_roots": {
       "type": "string",

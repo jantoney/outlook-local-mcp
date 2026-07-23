@@ -280,6 +280,7 @@ func sharedMailGuardFixture(t *testing.T, client *msgraphsdk.GraphServiceClient,
 	if err != nil {
 		t.Fatalf("NewMailAlias() error = %v", err)
 	}
+	alias.Validation = resource.Validation{Status: resource.ValidationAvailable}
 	entry := &auth.AccountEntry{
 		AccountID: auth.AccountID("11111111-1111-4111-8111-111111111111"), Label: "work",
 		Client: client, Authenticated: true, TokenTenantContext: tenant, MailAliases: []resource.MailAlias{alias},

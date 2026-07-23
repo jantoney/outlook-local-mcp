@@ -306,6 +306,7 @@ func TestSaveLoadAuthCodeAccount_RoundTrip(t *testing.T) {
 // TestSaveAuthCodeAccount_FilePermissions verifies that the saved account file
 // has 0600 permissions (owner read/write only).
 func TestSaveAuthCodeAccount_FilePermissions(t *testing.T) {
+	requirePOSIXModeBits(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "account.json")
 
@@ -481,6 +482,7 @@ func TestNewAuthCodeCredential_WithCacheAccessor(t *testing.T) {
 // TestSaveAuthCodeAccount_CreatesDirectory verifies that saveAuthCodeAccount
 // creates the parent directory with 0700 permissions if it does not exist.
 func TestSaveAuthCodeAccount_CreatesDirectory(t *testing.T) {
+	requirePOSIXModeBits(t)
 	dir := filepath.Join(t.TempDir(), "nested", "dir")
 	path := filepath.Join(dir, "account.json")
 

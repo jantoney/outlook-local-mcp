@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -390,11 +391,15 @@ func TestValidateConfig_AuthRecordPath(t *testing.T) {
 // when the LogFile parent directory exists.
 func TestValidateConfig_LogFileParentExists(t *testing.T) {
 	var buf bytes.Buffer
+	originalLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	slog.SetDefault(logger)
 
 	cfg := validConfig()
-	cfg.LogFile = "/tmp/test.log"
+	directory := t.TempDir()
+	cfg.AuthRecordPath = filepath.Join(directory, "auth_record.json")
+	cfg.LogFile = filepath.Join(directory, "test.log")
 
 	_ = ValidateConfig(cfg)
 
@@ -408,11 +413,15 @@ func TestValidateConfig_LogFileParentExists(t *testing.T) {
 // when the LogFile parent directory does not exist.
 func TestValidateConfig_LogFileParentMissing(t *testing.T) {
 	var buf bytes.Buffer
+	originalLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	slog.SetDefault(logger)
 
 	cfg := validConfig()
-	cfg.LogFile = "/nonexistent/dir/test.log"
+	directory := filepath.Join(t.TempDir(), "missing")
+	cfg.AuthRecordPath = filepath.Join(t.TempDir(), "auth_record.json")
+	cfg.LogFile = filepath.Join(directory, "test.log")
 
 	err := ValidateConfig(cfg)
 	if err != nil {

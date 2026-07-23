@@ -127,6 +127,40 @@ func (target mailReadTarget) attachmentID(requestID, reference string, codec *re
 	return claims.GraphIDChain[1].ID, nil
 }
 
+// draftAttachmentID returns an own raw attachment ID or verifies a shared
+// attachment reference whose parent message is the routed draft. The request
+// ID is used only for own mail; shared mail requires reference and codec. It
+// returns the resolved Graph attachment ID without network side effects and an
+// error for missing, raw shared, invalid, cross-target, or cross-draft input.
+func (target mailReadTarget) draftAttachmentID(requestID, reference string, codec *resource.ReferenceCodec) (string, error) {
+	if !target.isShared() {
+		if requestID == "" {
+			return "", fmt.Errorf("missing required parameter: attachment_id")
+		}
+		return requestID, nil
+	}
+	if requestID != "" {
+		return "", fmt.Errorf("shared mailbox attachment removal requires attachment_ref and does not accept attachment_id")
+	}
+	if reference == "" || codec == nil {
+		return "", fmt.Errorf("shared mailbox attachment removal requires a verified attachment_ref")
+	}
+	claims, err := codec.Verify(reference)
+	if err != nil {
+		return "", err
+	}
+	if claims.AccountID != target.target.AccountID || claims.ResourceID != target.target.ResourceID ||
+		claims.ResourceKind != target.target.Kind || claims.MailboxView != target.target.View ||
+		claims.ItemKind != resource.ItemKindAttachment || len(claims.GraphIDChain) != 2 {
+		return "", fmt.Errorf("attachment reference does not match the resolved shared mailbox")
+	}
+	if target.claims == nil || target.claims.ItemKind != resource.ItemKindDraft || len(target.claims.GraphIDChain) != 1 ||
+		claims.GraphIDChain[0].ID != target.claims.GraphIDChain[0].ID {
+		return "", fmt.Errorf("attachment reference does not match the verified parent draft")
+	}
+	return claims.GraphIDChain[1].ID, nil
+}
+
 // graphError returns a redacted Graph error without route fallback.
 func (target mailReadTarget) graphError(err error) string {
 	if !target.isShared() {

@@ -72,13 +72,20 @@ Add an `.mcp.json` file to your project root:
 
 Replace `/absolute/path/to/outlook-local-mcp` with the actual path to the built binary.
 
-## 3. Authenticate and Verify
+## 3. Configure and authenticate an account
 
-Restart Claude Desktop (or reload MCP servers in Claude Code) and ask:
+The server starts with no implicit account. Either use the account tool or enable the embedded local UI.
 
-> "List my calendars"
+```json
+{"tool":"account","args":{"operation":"add","label":"work","calendar_policy":"read"}}
+{"tool":"account","args":{"operation":"login","label":"work"}}
+```
 
-On first use, the server has no cached credentials. The default authentication method (`auth_code`) opens the system browser for Microsoft login. After signing in, the browser shows a blank page -- copy the full URL from the address bar and paste it when prompted (via MCP Elicitation) or use the `complete_auth` tool if your client does not support elicitation (e.g., Claude Code). After authentication completes, the tool call is retried automatically and your calendars are returned. Tokens are cached in your OS keychain -- subsequent requests authenticate silently.
+`account.login` returns an opaque process-bound session. Poll `account.auth_status` for browser/device-code instructions. For `auth_code`, send the full redirect URL to `account.complete_auth` with the returned session ID. Tokens are cached locally; subsequent starts attempt silent authentication only for the account's exact saved scope set.
+
+For the web UI, add `--web-ui` to the command (or set `OUTLOOK_MCP_WEB_UI_ENABLED=true`) and open `http://127.0.0.1:8155` after the MCP connection launches. Use `--web-ui-port 9000` or `OUTLOOK_MCP_WEB_UI_PORT=9000` to choose another port. Enabling or changing the launch option requires that harness connection to be relaunched, but normal account, permission, authentication, and shared-resource changes are live across all attached MCP sessions and never require restarting Codex. The UI preserves expanded sections while changes complete. Device-code authentication provides clickable and copyable sign-in instructions. The UI is optional; a bind failure leaves MCP running.
+
+After authentication, ask: “List my calendars using the work account.”
 
 ## 4. Tool Examples
 
@@ -138,18 +145,19 @@ Parameters: `event_id` (required), `comment` (optional cancellation message). On
 
 First ensure the owner has shared or delegated the calendar to the signed-in account in Outlook or Exchange. OAuth consent alone does not grant calendar access.
 
-For a mounted calendar, discover recipient-view candidates and have the user select the exact ID:
+For a mounted calendar, expand **Shared resources** in the web UI. Expansion refreshes recipient-view candidates and validates configured resources in the background. Select a discovered calendar, choose Off, Read, or Manage when editing is supported, and add it directly; its display name is converted to a safe local alias automatically. If discovery fails, enter the owner and mounted ID manually.
 
 ```json
-{"tool":"account","args":{"operation":"discover_calendar_aliases","label":"work","owner":"owner@contoso.com"}}
+{"tool":"account","args":{"operation":"refresh_shared_resources","label":"work"}}
 {"tool":"account","args":{"operation":"add_calendar_alias","label":"work","alias":"finance-calendar","owner":"owner@contoso.com","kind":"mounted_calendar","profile":"read","mounted_calendar_id":"<selected-id>","confirm_mounted_selection":true}}
+{"tool":"account","args":{"operation":"refresh_shared_resources","label":"work"}}
 ```
 
 Mounted list, search, and referenced get calls use that exact selected ID beneath `/me/calendars`; the server never builds the route from the configured owner. Unknown token tenant context is rejected until validated personal or organizational evidence is available.
 
 For an organizational owner's primary calendar, create an `owner_primary_calendar` with profile `off` or `read`. Owner-primary manage is not supported. Adding a shared scope disconnects the account only when the effective scope union changes; call `account.login` when prompted.
 
-After adding a read-enabled owner-primary alias, list events and retain the returned signed reference for follow-up reads:
+After adding a read-enabled owner-primary alias, re-authenticate if requested and refresh until direct validation reports `available`. Then list events and retain the returned signed reference for follow-up reads:
 
 ```json
 {"tool":"calendar","args":{"operation":"list_events","account":"work","shared_resource":"finance-calendar","date":"this_week","output":"summary"}}
@@ -165,6 +173,7 @@ Shared mailboxes require a validated organizational token context and existing E
 ```json
 {"tool":"account","args":{"operation":"add_mail_alias","label":"work","alias":"finance-mail","owner":"finance@contoso.com"}}
 {"tool":"account","args":{"operation":"set_mail_alias_policy","label":"work","alias":"finance-mail","read":true,"archive":true}}
+{"tool":"account","args":{"operation":"refresh_shared_resources","label":"work"}}
 ```
 
 Call `account.list_mail_aliases` to review the exact target policy and compatibility. Enabling shared send additionally requires Exchange Send As or Send on Behalf rights and the separate confirmed-draft workflow.
@@ -182,9 +191,8 @@ All environment variables are prefixed with `OUTLOOK_MCP_`:
 | `DEFAULT_TIMEZONE` | `UTC` | IANA timezone for calendar operations |
 | `LOG_LEVEL` | `warn` | Log level: `debug`, `info`, `warn`, `error` |
 | `READ_ONLY` | `false` | Disable write tools (create, update, delete, cancel) |
-| `MAIL_ENABLED` | `false` | Legacy/implicit default mapping to own-mail `read` |
-| `MAIL_MANAGE_ENABLED` | `false` | Legacy/implicit default mapping to own-mail `read` and `draft` |
-| `MAIL_SEND_ENABLED` | `false` | Legacy/implicit default mapping to own-mail `read`, `draft`, and `send` |
+| `WEB_UI_ENABLED` | `false` | Enable the embedded IPv4-loopback account UI |
+| `WEB_UI_PORT` | `8155` | Loopback port for the optional account UI |
 | `ATTACHMENT_ROOTS` | *(empty)* | Platform path-list of directories allowed for local draft attachments |
 | `LOG_FORMAT` | `json` | Log format: `json` or `text` |
 | `LOG_SANITIZE` | `true` | Mask PII in log output |
@@ -193,7 +201,7 @@ All environment variables are prefixed with `OUTLOOK_MCP_`:
 
 ### Using an app registration you own
 
-For predictable work, school, and personal account support, create a Microsoft identity platform public-client registration with **Accounts in any organizational directory and personal Microsoft accounts** (`AzureADandPersonalMicrosoftAccount`) and access-token version 2. Add the delegated Graph permissions `User.Read` and `Calendars.ReadWrite`, plus only the mail permissions required by the action policies you will use (`Mail.Read`, `Mail.ReadWrite`, and optionally `Mail.Send`). Enable public-client flows, add the mobile/desktop redirect URIs `http://localhost` and `https://login.microsoftonline.com/common/oauth2/nativeclient`, and do not create a client secret. Set `OUTLOOK_MCP_CLIENT_ID` to that application ID and keep `OUTLOOK_MCP_TENANT_ID=common` to allow both organizational and personal accounts.
+For predictable work, school, and personal account support, create a Microsoft identity platform public-client registration with **Accounts in any organizational directory and personal Microsoft accounts** (`AzureADandPersonalMicrosoftAccount`) and access-token version 2. `User.Read` is required. Add only the delegated permissions you intend to enable: `Calendars.Read` or `Calendars.ReadWrite` for own calendar access, plus the relevant mail/shared scopes. Enable public-client flows, add the mobile/desktop redirect URIs `http://localhost` and `https://login.microsoftonline.com/common/oauth2/nativeclient`, and do not create a client secret. Set `OUTLOOK_MCP_CLIENT_ID` to that application ID and keep `OUTLOOK_MCP_TENANT_ID=common` to allow both organizational and personal accounts.
 
 ## Getting help in-session
 
@@ -218,7 +226,7 @@ Fetch a document or a specific section by heading anchor:
 {tool: "system", args: {operation: "get_docs", slug: "troubleshooting", section: "keychain-locked"}}
 ```
 
-The embedded bundle contains `readme`, `quickstart`, and `troubleshooting`. Each document is also exposed as an MCP resource at `doc://outlook-local-mcp/{slug}` for clients that support `resources/list` and `resources/read`. Run `system.status` to discover the base URI and the troubleshooting slug. See CR-0061 for implementation details.
+The embedded bundle contains `readme`, `quickstart`, `concepts`, and `troubleshooting`. Each document is also exposed as an MCP resource at `doc://outlook-local-mcp/{slug}` for clients that support `resources/list` and `resources/read`. Run `system.status` to discover the base URI and the troubleshooting slug. See CR-0061 for implementation details.
 
 ## Further Reading
 

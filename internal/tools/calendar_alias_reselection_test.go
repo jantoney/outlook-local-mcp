@@ -76,6 +76,8 @@ func TestReselectMountedCalendarRotatesResourceIdentity(t *testing.T) {
 	if got.Alias != "team" || got.Owner != alias.Owner || got.Profile != alias.Profile || got.MountedCalendarID != "mounted-2" {
 		t.Fatalf("reselected alias = %+v, want stable human alias, owner, and profile with mounted-2", got)
 	}
+	got.Validation = resource.Validation{Status: resource.ValidationAvailable}
+	updated.CalendarAliases[0] = got
 	_, resolveErr := auth.ResolveTarget(updated, auth.TargetRequest{
 		Family: resource.TargetFamilyCalendar, SharedResource: "team", Capability: resource.TargetCapabilityRead,
 		Reference: oldReference, RequireReference: true, ItemKind: resource.ItemKindEvent,

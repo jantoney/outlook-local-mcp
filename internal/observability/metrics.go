@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -30,6 +31,18 @@ type ToolMetrics struct {
 	// activeRequests tracks the number of tool invocations currently in
 	// progress. Value increases on entry, decreases on exit.
 	activeRequests metric.Int64UpDownCounter
+}
+
+// RecordOperation records one completed transport operation using the same
+// tool_name and status dimensions as MCP middleware. duration is wall time.
+func RecordOperation(ctx context.Context, m *ToolMetrics, toolName, status string, duration time.Duration) {
+	if m == nil {
+		return
+	}
+	m.toolCallsTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("tool_name", toolName), attribute.String("status", status),
+	))
+	m.toolCallDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attribute.String("tool_name", toolName)))
 }
 
 // InitMetrics creates all five metric instruments from the given Meter and

@@ -179,21 +179,53 @@ func SanitizeAuditParams(params map[string]any) map[string]string {
 // Side effects: opens a file handle (kept open for the server lifetime),
 // sets module-level audit state. Logs an slog.Error on file open failure.
 func InitAuditLog(enabled bool, path string) {
+	var nextWriter io.Writer
+	if enabled {
+		nextWriter = os.Stderr
+		if path != "" {
+			file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			if err != nil {
+				slog.Error("audit log file open failed", "path", path, "error", err)
+			} else {
+				nextWriter = file
+			}
+		}
+	}
+
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	closeAuditWriterLocked()
+	auditWriter = nextWriter
 	auditEnabled = enabled
-	if !enabled {
-		return
+}
+
+// CloseAuditLog flushes and closes the active file-backed audit destination,
+// then disables audit emission. Stderr is never closed. The function is safe
+// to call repeatedly and while other goroutines may emit audit records.
+//
+// Side effects: waits for any active audit write, closes one file descriptor,
+// and clears module-level audit state. It returns a file close error, if any.
+func CloseAuditLog() error {
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	auditEnabled = false
+	err := closeAuditWriterLocked()
+	auditWriter = nil
+	return err
+}
+
+// closeAuditWriterLocked closes the current writer only when it is a dedicated
+// file. The caller must hold auditMu. It never closes process stderr.
+func closeAuditWriterLocked() error {
+	file, ok := auditWriter.(*os.File)
+	if !ok || file == os.Stderr {
+		return nil
 	}
-	if path == "" {
-		auditWriter = os.Stderr
-		return
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		slog.Error("audit log file open failed", "path", path, "error", err)
-		auditWriter = os.Stderr
-		return
-	}
-	auditWriter = f
+	return file.Close()
 }
 
 // EmitAuditLog serializes the given AuditEntry as a single JSON line and writes
@@ -208,9 +240,6 @@ func InitAuditLog(enabled bool, path string) {
 // Side effects: writes to the audit writer, acquires and releases auditMu.
 // Logs an slog.Error if JSON marshaling or writing fails.
 func EmitAuditLog(entry AuditEntry) {
-	if !auditEnabled {
-		return
-	}
 	data, err := json.Marshal(entry)
 	if err != nil {
 		slog.Error("audit log marshal failed", "error", err)
@@ -220,6 +249,9 @@ func EmitAuditLog(entry AuditEntry) {
 
 	auditMu.Lock()
 	defer auditMu.Unlock()
+	if !auditEnabled || auditWriter == nil {
+		return
+	}
 
 	if _, err := auditWriter.Write(data); err != nil {
 		slog.Error("audit log write failed", "error", err)

@@ -111,6 +111,7 @@ func setFixturePolicy(t *testing.T, registry *auth.AccountRegistry, policy resou
 		t.Fatalf("NewMailAlias() error = %v", err)
 	}
 	alias.Policy = policy
+	alias.Validation = resource.Validation{Status: resource.ValidationAvailable}
 	setFixtureAliases(t, registry, []resource.MailAlias{alias}, tenantContext, client)
 }
 

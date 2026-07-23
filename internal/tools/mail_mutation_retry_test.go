@@ -1,12 +1,14 @@
 package tools
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/desek/outlook-local-mcp/internal/auth"
 	"github.com/desek/outlook-local-mcp/internal/graph"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -22,6 +24,7 @@ func TestIrreversibleMailMutationsDisableSDKRetries(t *testing.T) {
 		{name: "shared_send", run: sharedSendTransientCalls},
 		{name: "permanent_delete", run: permanentDeleteTransientCalls},
 		{name: "direct_attachment", run: directAttachmentTransientCalls},
+		{name: "remove_attachment", run: removeAttachmentTransientCalls},
 		{name: "create_draft", run: createDraftTransientCalls},
 		{name: "move", run: moveTransientCalls},
 	}
@@ -34,6 +37,27 @@ func TestIrreversibleMailMutationsDisableSDKRetries(t *testing.T) {
 			})
 		}
 	}
+}
+
+// removeAttachmentTransientCalls returns the attachment DELETE count after a
+// successful own-draft preflight and a transient mutation response.
+func removeAttachmentTransientCalls(t *testing.T, status int) int {
+	t.Helper()
+	var calls int
+	client, server := newRealSDKGraphClient(t, transientMutationHandler(&calls, status, func(w http.ResponseWriter, request *http.Request) bool {
+		if request.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"draft+1","isDraft":true}`))
+			return true
+		}
+		return false
+	}))
+	defer server.Close()
+	ctx := auth.WithGraphClient(context.Background(), client)
+	request := mcp.CallToolRequest{}
+	request.Params.Arguments = map[string]any{"message_id": "draft+1", "attachment_id": "attachment+1"}
+	_, _ = NewHandleRemoveAttachment(graph.RetryConfig{}, time.Second)(ctx, request)
+	return calls
 }
 
 // sharedSendTransientCalls returns the number of owner-route send POSTs made

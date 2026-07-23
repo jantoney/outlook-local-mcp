@@ -26,7 +26,7 @@ When this test runs under `claude -p` or any other non-interactive caller, the f
 
 ## Instructions
 
-Follow every step sequentially. Use the **default account** (omit `account` param) unless the user specifies otherwise. Omit the `output` parameter for all read operations (the default is `text`) unless a step specifies otherwise.
+Follow every step sequentially. Select one account explicitly from Step 1 and pass its label to account-aware calendar and mail calls. Never assume or invent a default account. Omit the `output` parameter for read operations (the default is `text`) unless a step specifies otherwise.
 
 **Always call `help` first.** Before invoking any verb in a domain you have not yet exercised, call `{tool: "<domain>", args: {operation: "help"}}` to enumerate the available verbs **and their parameters**. The help output lists every parameter's exact name, type, required/optional status, and (where applicable) accepted enum values. Use those exact parameter names — do not guess (`id` vs `message_id` vs `event_id` differ between verbs and inventing names will surface as `missing required parameter` errors at call time). When a step's parameter spec disagrees with `help`, trust `help` and report the discrepancy in the findings section of the report.
 
@@ -69,14 +69,14 @@ Pick a test date **7 days from today** to avoid conflicts with real events. Use 
 
 Treat the following as a user question that you must answer using only the in-server documentation verbs (`system.search_docs`, `system.get_docs`). Do not rely on prior context, training data, or web knowledge for the answer:
 
-> "A user reports that the auto-registered `default` account keeps reappearing after they remove it. What does the server's in-built troubleshooting guide say to do?"
+> "A configured shared mailbox is denied with a validation status instead of routing to Graph. What does the server's in-built troubleshooting guide say to do?"
 
 - **Required actions:**
-  1. Call `system.search_docs` with a query you derive from the question (e.g. `"auto default account"` or `"default account reappear"`).
+  1. Call `system.search_docs` with a query you derive from the question (for example, `"shared resource validation"`).
   2. Based on the search hits, call `system.get_docs` with the most relevant `slug` (and `section` if the hit identifies one) to fetch the actual guidance.
   3. Compose a short answer (2–4 sentences) that paraphrases the retrieved section.
 - **Verify:** Both `system.search_docs` and `system.get_docs` were called in this step (recorded in the run's tool-call log).
-- **Verify:** Your answer references the troubleshooting section about the implicit default (anchor `#auto-default-account` or equivalent) — for example, mentioning that removal is persistent and the implicit `default` only re-registers when no other accounts are connected (CR-0064 semantics).
+- **Verify:** Your answer references the shared-resource validation troubleshooting section (anchor `#shared-resource-validation` or equivalent), including re-authentication followed by direct metadata validation.
 - **Purpose:** Confirms the **intent** of CR-0061 — that an LLM faced with an unfamiliar problem will discover and consult the in-server docs to help the user, rather than hallucinating from priors.
 - **Fail:** If you answer without calling `search_docs` AND `get_docs` in this step, or if the answer does not reflect content from the troubleshooting guide.
 
@@ -84,6 +84,7 @@ Treat the following as a user question that you must answer using only the in-se
 
 - **Verify:** At least one account is listed with an authenticated status.
 - **Verify:** The response contains a `docs` object with `base_uri="doc://outlook-local-mcp/"`, `troubleshooting_slug="troubleshooting"`, and a `version` field (CR-0061 AC-5).
+- **Verify:** The response contains a `broker` object with `role="broker"`, non-empty `instance_fingerprint` and `state_fingerprint`, a positive `pid`, `clients >= 1`, and a boolean `ui_owner`. Record these fields for the environment report (CR-0071).
 - **Fail:** Stop and report the authentication issue or if the `docs` section is absent.
 
 **0c.** Record the top-level status fields and the `config` object from the Step 0b JSON response.
@@ -463,7 +464,7 @@ Read the **log file path** recorded in Step 0c. Inspect the log entries emitted 
 
 ### Step 27 -- Force refresh authenticated account token
 
-Call `{tool: "account", args: {operation: "refresh", label: "<default account label>"}}`.
+Call `{tool: "account", args: {operation: "refresh", label: "<selected authenticated account label>"}}`.
 
 - **Pass:** Response is plain text confirming the refresh and including a new token expiry timestamp.
 - **Verify:** The response references the account's label and/or UPN.
@@ -473,9 +474,9 @@ Call `{tool: "account", args: {operation: "refresh", label: "<default account la
 
 > **Non-interactive mode:** Mark Steps 28 and 29 unconditionally **SKIP**. The login step requires interactive user input (browser or device code) and will hang a non-interactive runner. Do not attempt even if cached tokens appear valid.
 
-> **Note:** This test requires at least one non-default account in addition to the default account, or `account login` in Step 29 must be used to restore access before further tests. If only one account is registered, mark Steps 28 and 29 **SKIP** to avoid leaving the test environment unauthenticated.
+> **Note:** Use an authenticated account that is not needed by later cleanup. If only one account is registered, mark Steps 28 and 29 **SKIP**.
 
-Pick a **non-default authenticated account** from Step 1's list (the **attendee account label** in multi-account mode). Call `{tool: "account", args: {operation: "logout", label: "<non-default account label>"}}`.
+Pick an authenticated account from Step 1's list that can be safely disconnected. Call `{tool: "account", args: {operation: "logout", label: "<account label>"}}`.
 
 - **Pass:** Response is plain text confirming the logout.
 - **Verify:** A subsequent `{tool: "account", args: {operation: "list"}}` call shows the account as `disconnected` while still listing the entry (not removed).
@@ -488,9 +489,9 @@ Pick a **non-default authenticated account** from Step 1's list (the **attendee 
 
 Call `{tool: "account", args: {operation: "login", label: "<label from Step 28>"}}`.
 
-Complete the authentication flow interactively when prompted (browser, device code, or auth code, per the account's persisted auth method).
+Record the returned `session_id`. Poll `{tool: "account", args: {operation: "auth_status", session_id: "<session-id>"}}`. Complete browser or device-code instructions shown there. For auth code, call `{tool: "account", args: {operation: "complete_auth", session_id: "<session-id>", redirect_url: "<full redirect URL>"}}`.
 
-- **Pass:** Response is plain text confirming re-authentication, including the account's UPN.
+- **Pass:** Session status reaches `complete`, and account list includes the resolved UPN.
 - **Verify:** A subsequent `{tool: "account", args: {operation: "list"}}` call shows the account back as `authenticated`.
 - **Verify:** Calling `{tool: "account", args: {operation: "login", label: "<label>"}}` again on the same (now connected) account returns an error stating the account is already connected.
 - **Fail:** If the account does not return to the authenticated state or the already-connected guard does not trigger.
@@ -502,7 +503,7 @@ Complete the authentication flow interactively when prompted (browser, device co
 This step verifies that `account.remove` is durable across server restart when `accounts.json` contains an entry for the removed label (CR-0064 AC-4).
 
 1. Call `{tool: "account", args: {operation: "list"}}` and record the full set of registered account labels.
-2. Pick any non-default account that has a persisted `accounts.json` entry (for example the attendee account from Step 1). Record its label as `<remove-target>`.
+2. Pick any persisted account that is safe to remove and restore. Record its label as `<remove-target>`.
 3. Call `{tool: "account", args: {operation: "remove", label: "<remove-target>"}}`.
    - **Pass:** Response is plain text confirming removal including the label and "Token cache cleared."
    - **Verify:** A subsequent `{tool: "account", args: {operation: "list"}}` does not include `<remove-target>`.
@@ -510,19 +511,7 @@ This step verifies that `account.remove` is durable across server restart when `
 5. After restart, call `{tool: "account", args: {operation: "list"}}` again.
    - **Pass:** `<remove-target>` is absent from the account list.
    - **Fail:** If `<remove-target>` reappears, `accounts.json` was not rewritten correctly.
-6. **Restore:** Call `{tool: "account", args: {operation: "add", label: "<remove-target>", ...}}` with the original `client_id`, `tenant_id`, and `auth_method` to restore the attendee account for subsequent steps. Complete the authentication flow when prompted.
-
-### Step 29b -- Default reappearance when accounts.json loses cfg coverage (informational)
-
-> **Informational only.** Do not run this step in automated test suites; it requires a server restart and leaves the default account in a potentially unauthenticated state. Record as **SKIP** unless specifically testing CR-0064 AC-5.
-
-When `accounts.json` contains the only entry whose `client_id` and `tenant_id` match the env config (`OUTLOOK_MCP_CLIENT_ID`, `OUTLOOK_MCP_TENANT_ID`), removing that entry removes the gating signal. The implicit "default" reappears at the next server start. This is expected behavior: the env-only single-account UX is preserved.
-
-To verify AC-5 manually:
-1. Ensure `accounts.json` contains exactly one entry whose identity matches the env config.
-2. Run `{tool: "account", args: {operation: "remove", label: "<that entry>"}}`.
-3. Restart the server.
-4. Call `{tool: "account", args: {operation: "list"}}` and verify "default" is present.
+6. **Restore:** Call `{tool: "account", args: {operation: "add", label: "<remove-target>", ...}}` with the original identity and explicit permission policy, then complete the process-bound `account.login` session.
 
 ### Step 29c -- Independent own-mail policy secure default
 
@@ -542,7 +531,8 @@ To verify AC-5 manually:
 7. Recreate the original alias name with profile `off`. **Pass:** the new `resource_id` differs from the removed identity. Remove the recreated test alias as cleanup.
 8. When read-only mode is enabled, **verify** add, rename, remove, profile, and reselection mutations are rejected before persistence or Graph traffic.
 9. If a genuinely shared mounted calendar is available, call `discover_calendar_aliases`; have the user select one returned ID; add it only with `confirm_mounted_selection: true`. **Fail:** if creation accepts an unconfirmed ID, an ID owned by another resource, or silently chooses a candidate.
-10. If an organizational owner-primary calendar is genuinely delegated to the selected account, add or update its alias to profile `read`, reconnect if the scope union changed, and call `calendar.list_events` in text, summary, and raw modes with `shared_resource`. **Verify:** text and summary expose signed `resource_ref` values; raw keeps event data under `data` and references under the separate `provenance` sidecar.
+10. If an organizational owner-primary calendar is genuinely delegated to the selected account, add or update its alias to profile `read`, reconnect if the scope union changed, then call `account.refresh_shared_resources`. **Verify:** the alias must report `available` after one direct metadata-only Graph validation before any calendar operation succeeds.
+11. Call `calendar.list_events` in text, summary, and raw modes with `shared_resource`. **Verify:** text and summary expose signed `resource_ref` values; raw keeps event data under `data` and references under the separate `provenance` sidecar.
 11. Call `calendar.search_events` with the same alias and verify matching results also carry references. Use one returned reference with `calendar.get_event`, the same account, and the same alias. **Pass:** the event is returned without supplying `event_id`.
 12. Retry shared `get_event` with a tampered reference and with `event_id` plus the alias. Remove the alias and retry the original valid reference. **Pass:** every call is rejected locally and no Graph request occurs. Recreate only if needed for later manual testing; a recreated alias must not revive the old reference.
 13. If no genuinely delegated owner-primary calendar is available, record shared owner read as **SKIP**; do not invent an owner or weaken the negative checks.
@@ -644,7 +634,7 @@ Call `{tool: "mail", args: {operation: "get_conversation", id: "<conversation ID
 
 With a genuinely delegated organizational shared mailbox, enable only its `draft` action. Verify a shared `create_draft` returns a target-bound `draft_ref`, then update and delete it using `shared_resource` plus that reference. For reply and forward coverage, first obtain a shared `message_ref` from the same alias and verify each derived draft returns its own `draft_ref`. Confirm all calls remain on `/users/{owner}/messages` routes.
 
-If an operator supplied a safe file below 3 MiB under `OUTLOOK_MCP_ATTACHMENT_ROOTS`, attach it to the referenced shared draft with `add_attachment`. **Verify:** the route is `/users/{owner}/messages/{draft-id}/attachments`, the confirmation includes verified attachment metadata, shared target, and renewed draft provenance, and it exposes neither the canonical local path nor content. Try a file at least 3 MiB and verify no shared upload session starts.
+If an operator supplied a safe file below 3 MiB under `OUTLOOK_MCP_ATTACHMENT_ROOTS`, attach it to the referenced shared draft with `add_attachment`. **Verify:** the route is `/users/{owner}/messages/{draft-id}/attachments`, the confirmation includes verified attachment metadata, shared target, and renewed draft provenance, and it exposes neither the canonical local path nor content. Remove that attachment with `remove_attachment` using the shared alias, renewed `draft_ref`, and attachment-bound `attachment_ref`; verify the exact owner route is retained and the attachment is absent afterward. Try a cross-draft attachment reference and verify it fails locally. Try a file at least 3 MiB and verify no shared upload session starts.
 
 For denial coverage, try each shared draft verb with `draft` disabled, pass a raw `message_id` beside `shared_resource`, pass a draft reference from another alias or mailbox view, and revoke the alias policy between the `isDraft` preflight and update/delete or attachment mutation. **Verify:** every denied call stops locally or after the preflight GET with no mutation. If draft creation or attachment upload reports `PARTIAL SUCCESS`, record the returned recovery identifiers and do not repeat the mutation until the existing draft is inspected.
 
@@ -672,12 +662,14 @@ Call `{tool: "mail", args: {operation: "get_message", id: "<message ID>", output
 - **Verify:** If the attachment is within the configured size limit, content is returned (base64); otherwise an explanatory message is returned.
 - **Fail:** If the attachment cannot be retrieved for a valid ID.
 
-### Step 36a -- Add a local attachment to a draft
+### Step 36a -- Add and remove a local draft attachment
 
-If no safe test file path under `OUTLOOK_MCP_ATTACHMENT_ROOTS` was supplied by the operator, skip this step. Otherwise create a dedicated draft, call `{tool: "mail", args: {operation: "add_attachment", message_id: "<draft ID>", file_path: "<allowlisted test file>"}}`, then verify `list_attachments` shows the returned name and ID. Delete the dedicated draft afterward.
+If no safe test file path under `OUTLOOK_MCP_ATTACHMENT_ROOTS` was supplied by the operator, skip the upload portion. Otherwise create a dedicated draft, call `{tool: "mail", args: {operation: "add_attachment", message_id: "<draft ID>", file_path: "<allowlisted test file>"}}`, then verify `list_attachments` shows the returned name and ID. Call `{tool: "mail", args: {operation: "remove_attachment", message_id: "<draft ID>", attachment_id: "<attachment ID>"}}` and verify a subsequent `list_attachments` no longer contains that ID. Attempt removal from a non-draft message and verify no DELETE occurs. Delete the dedicated draft afterward.
 
 - **Verify:** The confirmation reports server-verified ID, name, size, content type, and upload mode.
+- **Verify:** Removal reports the draft and attachment IDs, and the attachment is absent afterward.
 - **Fail:** If the file escapes the allowlist, the draft changes unexpectedly, or metadata cannot be verified.
+- **Fail:** If removal accepts a non-draft message or removes a different attachment.
 
 ### Step 36b -- Human-confirmed draft send
 
@@ -700,11 +692,11 @@ After all steps, print a summary table. Every row **MUST** include a short `Comm
 | 0c   | Record config                     | PASS/FAIL      | e.g., "log_file present; timezone=Europe/Stockholm"      |
 | 0d   | Verify text default for status    | PASS/FAIL      | e.g., "plain text, no config leak"                       |
 | 0a   | system help (docs verbs listed)   | PASS/FAIL      | e.g., "list_docs, search_docs, get_docs present"         |
-| 0a2  | list_docs (text)                  | PASS/FAIL      | e.g., "3 slugs: readme, quickstart, troubleshooting"     |
+| 0a2  | list_docs (text)                  | PASS/FAIL      | e.g., "4 slugs: readme, quickstart, concepts, troubleshooting" |
 | 0a3  | search_docs (token refresh)       | PASS/FAIL      | e.g., "troubleshooting slug ranked in results"           |
 | 0a4  | get_docs section (token-refresh)  | PASS/FAIL      | e.g., "section content returned, no cross-section bleed" |
 | 0a5  | get_docs raw (troubleshooting)    | PASS/FAIL      | e.g., "raw markdown starts with # Troubleshooting"       |
-| 0a6  | docs intent (self-troubleshoot)   | PASS/FAIL      | e.g., "search_docs + get_docs called; answer cites #auto-default-account" |
+| 0a6  | docs intent (self-troubleshoot)   | PASS/FAIL      | e.g., "search_docs + get_docs called; answer cites #shared-resource-validation" |
 | 0b   | status docs section present       | PASS/FAIL      | e.g., "base_uri + troubleshooting_slug + version"        |
 | 1    | List accounts (text)              | PASS/FAIL      | e.g., "1 authenticated, 1 disconnected"                  |
 | 2    | List calendars (text)             | PASS/FAIL      | e.g., "default + Birthdays"                              |
@@ -753,7 +745,7 @@ After all steps, print a summary table. Every row **MUST** include a short `Comm
 | 34   | Delete drafts                     | PASS/FAIL/SKIP | e.g., "both drafts deleted, 404 on re-fetch"             |
 | 35   | Get conversation                  | PASS/FAIL/SKIP | e.g., "thread returned in chronological order"           |
 | 36   | Get attachment                    | PASS/FAIL/SKIP | e.g., "metadata + base64 under size limit"               |
-| 36a  | Add local draft attachment        | PASS/FAIL/SKIP | e.g., "verified metadata; direct upload"                 |
+| 36a  | Add/remove draft attachment       | PASS/FAIL/SKIP | e.g., "uploaded, removed exact ID, then absent"          |
 | 36b  | Human-confirmed draft send        | PASS/FAIL/SKIP | e.g., "accepted unchanged draft; Graph accepted send"    |
 ```
 

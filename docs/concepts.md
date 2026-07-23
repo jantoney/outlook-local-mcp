@@ -28,23 +28,19 @@ Account selection logic for calendar and mail verbs:
 - **Multiple authenticated accounts** — the server uses MCP Elicitation to prompt for selection.
 - **All accounts disconnected** — error lists disconnected accounts by UPN and suggests `account.login`.
 - **No accounts registered** — error directs to `account.add`.
-- **Elicitation unsupported or fails** — the default account is used as a fallback; if no default exists, the error lists available accounts and suggests using the `account` parameter.
+- **Elicitation unsupported or fails** — no account is guessed; the error lists available accounts and requires an explicit `account` parameter.
 
 Each account has its own token cache partition, auth record file, and Graph client instance. The `accounts.json` file stores only non-secret identity metadata. Tokens and credentials are managed separately by the OS-native token cache. The file is written atomically to prevent corruption on sudden exit.
 
-## Auto-default account semantics
+## Explicit account startup
 
-A **default account** is registered automatically at startup using the server's configured credentials (`CLIENT_ID`, `TENANT_ID`, `AUTH_METHOD`). Additional accounts added via `account.add` are persisted to `accounts.json` and restored on subsequent startups with silent token acquisition from the per-account cache (see CR-0064).
+Startup restores only accounts persisted in `accounts.json`; environment identity values are defaults for creating an account, not an implicit account. An empty registry is valid and remains empty until `account.add` or the optional web UI creates one. Persisted accounts attempt bounded silent authentication only when their saved permission set matches the cached grant. Disconnected accounts remain visible and require an explicit `account.login`.
 
-At startup the server performs a silent token probe (5-second timeout) to pre-authenticate persisted accounts. Accounts with expired tokens are registered as **disconnected** — they remain visible in `account.list` and `system.status` and can be reconnected explicitly via `account.login`, or will be re-authenticated automatically by the auth middleware on the first tool call that targets them.
-
-The default account cannot be removed via `account.remove`.
+The schema-v2 migration intentionally clears prior authentication and converts every account to explicit, fail-closed permissions. Re-authenticate once after upgrading. Removed accounts do not reappear from environment configuration.
 
 ## MCP elicitation requirement
 
-Multi-account features (account selection prompts, inline authentication during `account.add`) use the MCP Elicitation API. The server declares the `elicitation` capability at startup. MCP clients that support elicitation receive interactive prompts; clients that do not fall back to the default account for account selection and receive authentication feedback as tool result text.
-
-For `device_code` auth without elicitation, `account.add` uses a two-call pattern: the first call returns the device code and keeps the authentication goroutine alive in the background; the second call with the same label picks up the completed authentication and registers the account.
+Multi-account selection can use MCP Elicitation, but account lifecycle and authentication do not depend on it. `account.add` saves disconnected configuration. `account.login` creates an opaque, process-bound session; inspect it with `account.auth_status`, complete `auth_code` with `account.complete_auth`, or cancel it with `account.cancel_auth`. Device-code instructions are returned by the status verb. Sessions expire after 15 minutes and never expose tokens or PKCE verifier material.
 
 ## Read-only mode
 
@@ -58,9 +54,7 @@ OUTLOOK_MCP_READ_ONLY=true ./outlook-local-mcp
 
 The mail schema is stable at startup. Each account's own mailbox has independent `read`, `draft`, `move`, `archive`, `trash`, `restore`, `permanent_delete`, and `send` switches. The server checks the exact switch before constructing a Graph route. A broad OAuth token is never treated as local authorization for a disabled action.
 
-`account.list` and `system.status` show the effective matrix. Use `account.set_mail_policy` with an account label and one or more boolean switches; omitted switches remain unchanged. New explicitly added accounts start with every switch off unless the legacy `mail_profile` input is supplied. Permanent deletion and the newly introduced filing actions never become enabled through legacy migration.
-
-Legacy values remain accepted temporarily and map without granting new behavior: `calendar_only` enables nothing; `mail_read` enables only read; `mail_manage` enables read and draft; and `mail_send` enables read, draft, and send. Global `MAIL_ENABLED`, `MAIL_MANAGE_ENABLED`, and `MAIL_SEND_ENABLED` remain migration/default inputs for the implicit account and legacy records.
+`account.list` and `system.status` show the effective matrix. Use `account.set_permissions` to replace the complete own-calendar and own-mail policy, or `account.set_mail_policy` for a partial mail-only edit. New accounts start with optional access off. Legacy mail-profile inputs and global mail feature flags are not permission sources.
 
 OAuth scopes are derived from the enabled actions. Read alone contributes `Mail.Read`; draft or any filing/deletion action contributes `Mail.ReadWrite`; send contributes `Mail.ReadWrite` and `Mail.Send`. A policy change applies locally on the next request. The account disconnects and clears local authentication only when the required scope set changes; same-scope policy edits keep the session connected. Microsoft consent is not revoked automatically.
 
@@ -80,7 +74,9 @@ Shared calendars are explicit account-scoped allowlist entries, not additional s
 
 An `owner_primary_calendar` identifies the owner's primary calendar in owner view. It is available only with an organizational token context and remains read-only. A `mounted_calendar` identifies one calendar in the signed-in recipient's view. Creation and reselection perform fresh `/me/calendars` discovery filtered by the configured owner and require the human to confirm the exact mounted calendar ID. Mounted read supports validated personal and organizational contexts; unknown tenant context fails closed. Mounted manage additionally requires an organizational context and an editable discovery result.
 
-Use `account.discover_calendar_aliases`, then `account.add_calendar_alias`. Listing shows immutable identity and exact policy. Renaming changes only the human selector. Reselection preserves that selector and its owner, kind, view, and policy, but replaces the mounted ID and resource ID after fresh confirmation so references from the prior selection fail locally. Owner, kind, and mailbox view cannot be edited; retargeting requires idempotent removal and recreation, which also creates a new resource ID. A missing mount is never silently rebound.
+Use `account.refresh_shared_resources` to discover mounted calendars and validate configured aliases, then add or select the exact mounted ID. Manual entry remains available when discovery fails. Listing shows immutable identity, exact policy, and validation state. Renaming changes only the human selector. Reselection preserves that selector and its owner, kind, view, and policy, but replaces the mounted ID and resource ID after fresh confirmation so references from the prior selection fail locally. Owner, kind, and mailbox view cannot be edited; retargeting requires idempotent removal and recreation, which also creates a new resource ID. A missing mount is never silently rebound.
+
+An enabled alias routes only after a direct metadata-only Graph request succeeds for its exact route. Startup and manual refresh perform this check without reading events. `unverified`, `validating`, `unavailable`, `validation_failed`, and `reauthentication_required` all fail closed.
 
 Shared calendar read contributes `Calendars.Read.Shared`; manage contributes `Calendars.ReadWrite.Shared`. These join the account-wide OAuth scope union but do not replace target-local authorization or Exchange sharing rights.
 
@@ -92,9 +88,11 @@ An organizational mounted alias with profile `manage` can create, update, resche
 
 ## Shared mail aliases
 
-A shared-mail alias is a separate account-scoped allowlist entry for one owner-view mailbox routed through `/users/{owner}/...`. It has an immutable resource ID, owner, `mailbox` kind, and `owner` mailbox view. Renaming changes only the human selector and preserves identity. Retargeting requires idempotent removal and recreation, which creates a new identity and invalidates old target-bound references. A calendar and mail alias may use the same selector and owner without becoming the same resource.
+A shared-mail alias is a separate account-scoped allowlist entry for one owner-view mailbox routed through `/users/{owner}/...`. It has an immutable resource ID, owner, `mailbox` kind, and `owner` mailbox view. Renaming changes only the human selector and preserves identity. Retargeting requires idempotent removal and recreation, which creates a new identity and invalidates old target-bound references. Calendar and mail aliases share one account-wide selector namespace so routing stays unambiguous.
 
 New aliases start with all eight actions disabled: `read`, `draft`, `move`, `archive`, `trash`, `restore`, `permanent_delete`, and `send`. Use `account.set_mail_alias_policy` to change only explicitly supplied switches. Each alias policy is independent of the signed-in account's own-mail policy and every other alias. Personal and unknown token contexts reject shared-mail configuration and use locally; only validated organizational contexts are compatible. Exchange mailbox, folder, and Send As or Send on Behalf delegation remains authoritative.
+
+After enabling an action and completing any required authentication, call `account.refresh_shared_resources`. The mailbox remains unavailable until `/users/{owner}/mailFolders/inbox` succeeds as a direct metadata-only validation; no message content is returned by that check.
 
 Shared read contributes `Mail.Read.Shared`. Draft, filing, recovery, deletion, or send contributes `Mail.ReadWrite.Shared`; send also contributes `Mail.Send.Shared`. The server disconnects the account only when changing an alias alters the complete account-wide scope union. OAuth consent never authorizes an action disabled by the selected alias policy.
 
@@ -107,6 +105,8 @@ Draft creation returns a `draft_ref` bound to the shared mailbox and current Gra
 ## Local draft attachments
 
 `mail.add_attachment` attaches exactly one local file to an existing draft and requires the exact `draft` capability. `OUTLOOK_MCP_ATTACHMENT_ROOTS` is a platform path-list allowlist; an empty value disables local upload. Canonical paths outside those roots, including traversal and link escapes, are rejected. Own-mail files below 3 MiB use direct upload, files through 150 MiB use sequential resumable upload, and larger files are rejected.
+
+`mail.remove_attachment` permanently removes exactly one attachment from an existing draft under the same exact `draft` capability. Own mail uses the draft and attachment IDs. Shared mail requires `shared_resource`, a target-bound `draft_ref`, and an `attachment_ref` bound to that same parent draft; raw shared IDs and cross-draft references are rejected locally. The server confirms `isDraft=true`, reauthorizes the immutable target immediately before one non-retried DELETE, and never removes attachments from sent or received messages. Microsoft Graph has no atomic attachment replacement operation, so the MCP does not expose `replace_attachment`; callers that need a new version must explicitly remove the old attachment and then add the new file as separate operations.
 
 Shared-mail attachment upload requires `shared_resource` plus the target-bound `draft_ref` and is intentionally limited to allowlisted files below 3 MiB. After the draft preflight and local file checks, the server reauthorizes the account, alias, draft policy, reference, client, and exact owner route immediately before the single direct POST. Verification retains that immutable route. Confirmations expose verified name, size, MIME type, attachment ID, shared target, and renewed draft provenance, but never the canonical local path or file content. If Graph accepted the attachment but verification or provenance is incomplete, the result reports `PARTIAL SUCCESS` and warns against repeating the upload until the draft is inspected. Large shared upload sessions are not advertised or started.
 
@@ -130,13 +130,13 @@ Before shared elicitation, the server binds the immutable target, masked delegat
 
 ## Headless and non-interactive authentication
 
-Authentication is lazy — deferred until the first tool call rather than blocking at startup. Three flows are available, controlled by `OUTLOOK_MCP_AUTH_METHOD`:
+Authentication is explicit and process-bound. Start it from the web UI or `account.login`. Three flows are available per account:
 
 **`device_code`** (default for well-known client IDs) — the server obtains a device code from Entra ID and delivers it to the user. If MCP Elicitation is supported, the user sees the code in a prompt; otherwise it appears as tool result text. The tool returns immediately; calling any tool after the user completes sign-in in their browser picks up the cached token automatically. Works in all environments including headless and Docker.
 
 **`browser`** (default for custom app registrations) — the system browser opens to the Microsoft login page and the server listens on a localhost port for the OAuth callback. Requires an app registration with `http://localhost` redirect URI.
 
-**`auth_code`** — the system browser opens for OAuth login. The user pastes the redirect URL back via MCP Elicitation or the `system.complete_auth` verb. Uses PKCE for security. Suitable for headless or remote environments where a localhost port cannot be opened.
+**`auth_code`** — returns a Microsoft authorization URL. Paste the full redirect URL into the same session through `account.complete_auth`. Uses PKCE for security. Suitable for headless or remote environments where a localhost callback cannot be opened.
 
 On subsequent runs the server acquires tokens silently using the cached refresh token. No browser interaction is needed unless the refresh token expires (typically after 90 days of inactivity) or the token cache is cleared. When a token expires mid-session, the auth middleware detects the failure and re-initiates the configured flow with client-visible prompts.
 
@@ -146,7 +146,8 @@ The server requests scopes incrementally. Expanding mail access after initial co
 
 | Feature | OAuth scope |
 |---|---|
-| Calendar (always active) | `Calendars.ReadWrite` |
+| Own calendar `read` | `Calendars.Read` |
+| Own calendar `manage` | `Calendars.ReadWrite` |
 | Account identity (always active) | `User.Read` |
 | Own-mail `read` only | `Mail.Read` |
 | Any draft, filing, recovery, or deletion action | `Mail.ReadWrite` |
@@ -159,6 +160,20 @@ The server requests scopes incrementally. Expanding mail access after initial co
 | Refresh tokens (always) | `offline_access` (added automatically by the identity library) |
 
 `Mail.Send` is requested only when an account's own-mail policy enables `send`.
+
+At startup, each connected account is checked on a best-effort basis with metadata-only Graph requests. The server selects only the signed-in user's `id` to prove `User.Read`, requests at most one calendar `id` when own-calendar access is enabled, and reads only Inbox metadata when any own-mail action is enabled. These checks do not request events, messages, or the user's email address and never start interactive authentication.
+
+## Optional local account web UI
+
+Start the embedded UI with `--web-ui` or `OUTLOOK_MCP_WEB_UI_ENABLED=true`. It listens only on IPv4 loopback at `http://127.0.0.1:8155` by default; choose another port with `--web-ui-port` or `OUTLOOK_MCP_WEB_UI_PORT`. The UI is served by the same Go process and stops with MCP. A listener failure disables only the UI and does not stop stdio MCP.
+
+Equivalent stdio launches from Codex or another harness attach to one dedicated broker for that executable, state store, cache namespace, and behavior configuration. The broker owns the account registry, authentication sessions, Graph clients, validation, persistence, and web UI; the visible harness processes are lightweight stdio proxies with independent MCP sessions. Account and permission changes made in the UI or through any MCP session are therefore immediately visible to every attached session. They do **not** require restarting Codex or reconnecting MCP.
+
+Different executable paths and different account/auth storage realms never share a broker. A separate state-realm guard also prevents incompatible configurations from becoming concurrent writers to the same store. Private broker traffic uses an authenticated, dynamically derived IPv4-loopback endpoint; the UI port is not used for broker discovery or identity.
+
+If a broker exits unexpectedly, a proxy rebuilds its MCP session. It automatically replays the interrupted request only when the exact `domain.operation` verb is explicitly annotated read-only. Write, destructive, malformed, and unknown operations are never automatically replayed: the proxy reports an unknown outcome and asks the agent to inspect state before retrying.
+
+Permission controls save immediately. When the deterministic required scope union changes, the account is disconnected and marked **re-authentication required**; press Authenticate to obtain a grant for the new set. Active and required scopes are displayed separately. Shared resources remain unusable until a direct metadata-only Graph request validates their exact route. Refresh re-enumerates mounted calendars and revalidates configured calendars and mailboxes; discovery failure does not disable manual entry.
 
 ## Well-known client IDs
 

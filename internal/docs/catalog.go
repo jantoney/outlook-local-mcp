@@ -55,13 +55,13 @@ var staticEntries = []struct {
 	{
 		slug:    "concepts",
 		title:   "Concepts",
-		summary: "Core concepts: output tiers, multi-account model, auto-default account, MCP elicitation, read-only mode, mail gating, headless auth, OAuth scopes, well-known client IDs, in-server docs, and observability.",
+		summary: "Core concepts: output tiers, explicit accounts, local web administration, permission policies, shared-resource validation, OAuth scopes, in-server docs, and observability.",
 		tags:    []string{"output", "accounts", "auth", "mail", "scopes", "observability", "elicitation", "concepts"},
 	},
 	{
 		slug:    "troubleshooting",
 		title:   "Troubleshooting Guide",
-		summary: "Common failure modes and remediation steps: auth errors, Graph throttling, mail flags, Keychain, and account lifecycle.",
+		summary: "Common failure modes and remediation steps: authentication, Graph throttling, local web UI, shared validation, Keychain, and account lifecycle.",
 		tags:    []string{"auth", "error", "keychain", "throttling", "mail", "account", "troubleshooting"},
 	},
 }

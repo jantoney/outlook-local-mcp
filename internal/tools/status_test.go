@@ -137,6 +137,29 @@ func TestStatus_ReturnsHealthSummary(t *testing.T) {
 	}
 }
 
+// TestStatusReportsBrokerDiagnostics verifies the safe broker ownership fields
+// are live and do not require exposing private endpoint credentials.
+func TestStatusReportsBrokerDiagnostics(t *testing.T) {
+	cfg := testConfig()
+	cfg.BrokerRole = "broker"
+	cfg.BrokerInstanceFingerprint = "instance-fingerprint"
+	cfg.BrokerStateFingerprint = "state-fingerprint"
+	cfg.BrokerPID = 1234
+	cfg.BrokerClientCount = func() int { return 3 }
+	cfg.BrokerUIOwner = true
+	resp := callStatus(t, cfg, auth.NewAccountRegistry(), time.Now())
+	broker, ok := resp["broker"].(map[string]any)
+	if !ok {
+		t.Fatalf("broker diagnostics = %T, want object", resp["broker"])
+	}
+	if broker["role"] != "broker" || broker["pid"] != float64(1234) || broker["clients"] != float64(3) || broker["ui_owner"] != true {
+		t.Fatalf("unexpected broker diagnostics: %v", broker)
+	}
+	if broker["instance_fingerprint"] != "instance-fingerprint" || broker["state_fingerprint"] != "state-fingerprint" {
+		t.Fatalf("unexpected broker fingerprints: %v", broker)
+	}
+}
+
 // TestStatus_NoGraphAPICalls verifies that the status tool completes without
 // network access. The test uses a registry with nil Graph clients, which would
 // panic if any Graph API call were attempted.
@@ -316,8 +339,8 @@ func TestStatus_FeaturesGroup(t *testing.T) {
 	if features["read_only"] != false {
 		t.Errorf("read_only = %v, want false", features["read_only"])
 	}
-	if features["mail_enabled"] != false {
-		t.Errorf("mail_enabled = %v, want false", features["mail_enabled"])
+	if features["web_ui_enabled"] != false {
+		t.Errorf("web_ui_enabled = %v, want false", features["web_ui_enabled"])
 	}
 	if features["provenance_tag"] != "com.github.desek.outlook-local-mcp.created" {
 		t.Errorf("provenance_tag = %v, want %q", features["provenance_tag"], "com.github.desek.outlook-local-mcp.created")

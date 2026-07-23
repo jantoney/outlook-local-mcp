@@ -8,13 +8,13 @@ Reference documentation for the server's component layout, middleware chain, MCP
 
 ## Architecture and component overview
 
-The server is a single Go binary that runs as a local stdio-based MCP server. It integrates three core packages:
+The application is a single Go binary with two runtime roles: a lightweight stdio proxy per harness connection and one authoritative broker per compatible executable-and-state identity. It integrates three core packages:
 
 - **mcp-go** (`github.com/mark3labs/mcp-go`) for MCP protocol server, tool registration, and stdio transport
 - **azidentity** (`github.com/Azure/azure-sdk-for-go/sdk/azidentity`) for Device Code OAuth 2.0 flow with persistent token caching
 - **msgraph-sdk-go** (`github.com/microsoftgraph/msgraph-sdk-go`) for the typed Go client targeting Microsoft Graph API v1.0
 
-The runtime flow is: (1) initialize structured logging; (2) load cached authentication or prompt device code login; (3) construct a Graph client; (4) register MCP tools; (5) start the stdio server and process tool calls. The Graph client is initialized once at startup and shared across all tool handler invocations via a package-level variable. Each tool handler makes one or more Graph API calls, serializes the response to JSON, and returns it as an `mcp.CallToolResult` text content.
+The runtime flow is: (1) every launch derives a versioned identity from the canonical executable path, persistence realm, cache namespace, and behavior configuration; (2) the launch finds or starts its dedicated broker; (3) the harness-facing process bridges stdio JSON-RPC into a private authenticated Streamable HTTP session; (4) only the elected broker restores accounts, constructs Graph clients, registers MCP tools, performs validation, and serves the optional UI. Every proxy has an independent MCP session while all share the broker's live registry.
 
 ### Microsoft Graph API versioning
 
@@ -72,6 +72,7 @@ internal/
   graph/          Graph API utilities: errors, retry, timeout, serialization, enums, recurrence
   validate/       Input validation helpers
   observability/  OpenTelemetry metrics and tracing, WithObservability middleware
+  instancebroker/ Identity, election, endpoint authentication, leases, stdio proxy, recovery
   server/         RegisterTools, ReadOnlyGuard, AwaitShutdownSignal
   tools/          4 aggregate domain tools dispatching verb sets
   docs/           Catalog, search, llms.txt; consumes docs.Bundle from docs/embed.go
@@ -97,15 +98,15 @@ Each middleware is applied in `internal/server/server.go` via the `wrap` / `wrap
 
 ## MCP server setup and transport
 
-### Transport choice: stdio
+### Transport boundary: stdio outside, authenticated loopback inside
 
-The server uses **stdio transport exclusively**. This is the correct choice for a local, single-user MCP server for three reasons:
+Harness configuration remains **stdio**. The process attached to each harness owns only that stdin/stdout stream and proxies raw JSON-RPC to its authoritative broker. The broker uses stateful Streamable HTTP on a private IPv4-loopback port because `mcp-go`'s stdio adapter is single-client and cannot preserve several clients' elicitation and capability sessions in one process.
 
 1. **Claude Desktop's `claude_desktop_config.json` only supports stdio** for locally configured servers. There is no `"url"` field or `"type": "http"` option in the local config format.
 2. **The MCP specification explicitly recommends stdio for local subprocess servers**: "Clients SHOULD support stdio whenever possible."
 3. **Device code auth maps naturally to stderr.** The server prints the device code prompt to stderr, which Claude Desktop captures in its MCP server logs (`~/Library/Logs/Claude/mcp-server-*.log` on macOS).
 
-mcp-go supports three other transports (SSE, Streamable HTTP, In-Process), all of which add unnecessary complexity for this use case. SSE is deprecated in the MCP 2025-03-26 spec. Streamable HTTP is designed for remote multi-client servers. Neither offers any benefit for a local subprocess.
+The internal endpoint is not user configuration and is not the web UI port. A deterministic bind elects one broker before mutable state initialization. Its descriptor contains an instance/state/protocol binding plus a random capability token stored with owner-only permissions. All private routes require that bearer token. A second deterministic state-realm guard prevents incompatible identities from concurrently writing the same account store.
 
 ### Server creation
 
@@ -131,16 +132,14 @@ Tools are registered via `s.AddTool(tool, handler)` where `tool` is an `mcp.Tool
 func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error)
 ```
 
-### Stdio transport
+### Stdio proxy and recovery
 
 ```go
-if err := server.ServeStdio(s); err != nil {
-    slog.Error("stdio transport error", "error", err)
-    os.Exit(1)
-}
+proxy, _ := instancebroker.NewProxy(identity, executable, args, os.Stdin, os.Stdout)
+if err := proxy.Run(context.Background()); err != nil { os.Exit(1) }
 ```
 
-`server.ServeStdio` reads JSON-RPC messages from stdin and writes responses to stdout. All diagnostic output (authentication prompts, logs, errors) **must** go to stderr to avoid corrupting the MCP protocol stream. The `ServeStdio` function blocks until stdin closes (client disconnects) or the process receives SIGINT/SIGTERM.
+The proxy preserves raw request IDs, serializes stdout, forwards server-to-client requests, and renews a broker lease. Broker loss rebuilds the session by replaying `initialize` and `notifications/initialized`. The interrupted operation itself is replayed once only if protocol metadata or the exact authoritative per-verb `readOnlyHint` marks it read-only. Writes and unknown operations receive an explicit unknown-outcome/retry-required error and are never automatically replayed.
 
 ---
 
@@ -256,30 +255,32 @@ The server reads configuration from environment variables with sensible defaults
 | `OUTLOOK_MCP_LOG_LEVEL` | `warn` | Minimum log level: `debug`, `info`, `warn`, `error`. |
 | `OUTLOOK_MCP_LOG_FORMAT` | `json` | Log output format: `json` for structured JSON lines, `text` for human-readable `key=value` format. Both include source file and line number. |
 | `OUTLOOK_MCP_LOG_FILE` | *(empty)* | Optional file path for persistent log output. When set, log records are written to both stderr and the file via a `MultiHandler`. File is opened append-mode with `0600` permissions. See CR-0023. |
-| `OUTLOOK_MCP_MAIL_ENABLED` | `false` | Enable read-only mail access. When `true`, adds `Mail.Read` OAuth scope and registers mail verbs. See CR-0043. |
+| `OUTLOOK_MCP_WEB_UI_ENABLED` | `false` | Enable the embedded IPv4-loopback account administration UI. |
+| `OUTLOOK_MCP_WEB_UI_PORT` | `8155` | Fixed loopback port for the optional UI. |
 | `OUTLOOK_MCP_PROVENANCE_TAG` | `com.github.desek.outlook-local-mcp.created` | Name for the provenance extended property stamped on MCP-created events. Combined with a dedicated GUID to form the full MAPI property ID. Set to empty string to disable provenance tagging entirely. See CR-0040. |
 
 ---
 
 ## Startup and lifecycle sequence
 
-The server's `main()` function executes these steps in order:
+The executable executes these steps in order:
 
-1. **Initialize logger** from `OUTLOOK_MCP_LOG_LEVEL` and `OUTLOOK_MCP_LOG_FORMAT` environment variables. This MUST be the very first operation so that all subsequent steps can log properly.
-2. **Load remaining configuration** from environment variables.
-3. **Initialize persistent token cache** via `cache.New()`. If unavailable (e.g., missing libsecret on Linux), log a warning and continue with in-memory cache.
-4. **Load authentication record** from disk. If the file doesn't exist, `record` is zero-value.
-5. **Create `DeviceCodeCredential`** with the Microsoft Office client ID, tenant, cache, record, and stderr prompt.
-6. **Check if first-run authentication is needed.** If `record` is zero-value, call `cred.Authenticate(ctx, nil)` which triggers device code flow. Save the returned `AuthenticationRecord` to disk.
-7. **Create Graph client** via `msgraphsdk.NewGraphServiceClientWithCredentials(cred, []string{"Calendars.ReadWrite"})`.
-8. **Create MCP server** via `server.NewMCPServer("outlook-local", "1.0.0", ...)`.
-9. **Register all tools** with their handlers, logging each registration.
-10. **Start stdio transport** via `server.ServeStdio(s)`. This blocks until the client disconnects or the process is killed.
-11. On exit, log shutdown reason. No explicit cleanup is needed; the persistent cache and auth record are already on disk.
+1. Load and validate public configuration, canonicalize paths, and derive the broker and state identities.
+2. A normal launch resolves the authenticated endpoint or starts a broker candidate, then serves its harness stdio stream as a proxy.
+3. A broker candidate acquires the state guard and instance listener before opening files, restoring credentials, or performing migrations; a losing candidate exits without touching state.
+4. The elected broker initializes logging, audit, telemetry, account persistence, the registry, and `accountadmin.Module`.
+5. If enabled, it binds the independent web UI port. A failure is recorded and MCP continues without the UI.
+6. It registers the four aggregate MCP tools, derives the replay catalog from exact verb annotations, and registers embedded resources.
+7. It serves authenticated stateful MCP sessions, starts the web adapter, and performs bounded metadata-only validation.
+8. Proxy leases keep the broker alive across individual harness exits. With no live proxy, the broker shuts down after a 30-second grace.
 
 ### Graceful shutdown
 
-The stdio server exits naturally when stdin closes (MCP client disconnects). If the process receives SIGINT or SIGTERM, it should exit cleanly. Since `ServeStdio` blocks on stdin, a signal handler can cancel a context or simply call `os.Exit(0)`.
+A proxy exits when its harness stdin closes and releases its lease; other sessions continue without disruption. The broker stops only after all leases expire or on SIGINT/SIGTERM. Shutdown cancels process-bound authentication and startup validation and gracefully drains the private MCP and optional web HTTP servers.
+
+### Account administration boundary
+
+`internal/accountadmin` owns account configuration, permission transitions, authentication sessions, shared discovery, and direct resource validation. It is independent of HTTP and MCP request types. `internal/webui` is an embedded `net/http` adapter with exact Host/Origin/CSRF checks, body limits, restrictive browser headers, and no token-bearing views. Account MCP verbs are the second adapter over the same module.
 
 ---
 

@@ -58,7 +58,7 @@ func ResolveTarget(entry *AccountEntry, request TargetRequest, codec *resource.R
 // alias family and applies token-context compatibility before authorization.
 func resolveTargetIdentity(entry *AccountEntry, request TargetRequest) (resource.Target, error) {
 	if request.SharedResource == "" {
-		return resource.NewOwnTarget(entry.AccountID, request.Family, entry.MailPolicy)
+		return resource.NewOwnTargetWithCalendarPolicy(entry.AccountID, request.Family, resource.CalendarProfile(entry.CalendarPolicy), entry.MailPolicy)
 	}
 	switch request.Family {
 	case resource.TargetFamilyCalendar:
@@ -68,6 +68,9 @@ func resolveTargetIdentity(entry *AccountEntry, request TargetRequest) (resource
 			}
 			if err := resource.ValidateCalendarCompatibility(alias, string(entry.EffectiveTokenTenantContext())); err != nil {
 				return resource.Target{}, fmt.Errorf("account %q calendar alias %q capability %q denied: %w", entry.Label, alias.Alias, request.Capability, err)
+			}
+			if !alias.Validation.AllowsOperations() {
+				return resource.Target{}, fmt.Errorf("account %q calendar alias %q is not available: validation status %q", entry.Label, alias.Alias, alias.Validation.Status)
 			}
 			return resource.TargetFromCalendarAlias(entry.AccountID, alias)
 		}
@@ -81,6 +84,9 @@ func resolveTargetIdentity(entry *AccountEntry, request TargetRequest) (resource
 			}
 			if err := resource.ValidateMailCompatibility(alias, string(entry.EffectiveTokenTenantContext())); err != nil {
 				return resource.Target{}, fmt.Errorf("account %q mail alias %q capability %q denied: %w", entry.Label, alias.Alias, request.Capability, err)
+			}
+			if !alias.Validation.AllowsOperations() {
+				return resource.Target{}, fmt.Errorf("account %q mail alias %q is not available: validation status %q", entry.Label, alias.Alias, alias.Validation.Status)
 			}
 			return resource.TargetFromMailAlias(entry.AccountID, alias)
 		}

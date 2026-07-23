@@ -890,97 +890,15 @@ func TestLoadConfig_ProvenanceTagEmpty(t *testing.T) {
 	}
 }
 
-// TestLoadConfig_MailEnabledDefault validates that MailEnabled defaults to false
-// when OUTLOOK_MCP_MAIL_ENABLED is not set.
-func TestLoadConfig_MailEnabledDefault(t *testing.T) {
-	clearOutlookEnvVars(t)
-
-	cfg := LoadConfig()
-
-	if cfg.MailEnabled {
-		t.Error("MailEnabled should default to false when OUTLOOK_MCP_MAIL_ENABLED is unset")
-	}
-}
-
-// TestLoadConfig_MailEnabledTrue validates that MailEnabled is true when
-// OUTLOOK_MCP_MAIL_ENABLED is set to "true".
-func TestLoadConfig_MailEnabledTrue(t *testing.T) {
-	clearOutlookEnvVars(t)
+// TestLoadConfigLegacyMailFlagsIgnored verifies the superseded global mail
+// gates cannot silently grant permissions to a configured account.
+func TestLoadConfigLegacyMailFlagsIgnored(t *testing.T) {
 	t.Setenv("OUTLOOK_MCP_MAIL_ENABLED", "true")
-
-	cfg := LoadConfig()
-
-	if !cfg.MailEnabled {
-		t.Error("MailEnabled should be true when OUTLOOK_MCP_MAIL_ENABLED=true")
-	}
-}
-
-// TestLoadConfig_MailEnabledTrueUppercase validates that MailEnabled is true
-// when OUTLOOK_MCP_MAIL_ENABLED is set to "TRUE" (case-insensitive).
-func TestLoadConfig_MailEnabledTrueUppercase(t *testing.T) {
-	clearOutlookEnvVars(t)
-	t.Setenv("OUTLOOK_MCP_MAIL_ENABLED", "TRUE")
-
-	cfg := LoadConfig()
-
-	if !cfg.MailEnabled {
-		t.Error("MailEnabled should be true when OUTLOOK_MCP_MAIL_ENABLED=TRUE")
-	}
-}
-
-// TestLoadConfig_MailEnabledFalse validates that MailEnabled is false when
-// OUTLOOK_MCP_MAIL_ENABLED is set to "false".
-func TestLoadConfig_MailEnabledFalse(t *testing.T) {
-	clearOutlookEnvVars(t)
-	t.Setenv("OUTLOOK_MCP_MAIL_ENABLED", "false")
-
-	cfg := LoadConfig()
-
-	if cfg.MailEnabled {
-		t.Error("MailEnabled should be false when OUTLOOK_MCP_MAIL_ENABLED=false")
-	}
-}
-
-// TestMailManageImpliesMailEnabled validates that when
-// OUTLOOK_MCP_MAIL_MANAGE_ENABLED is true and OUTLOOK_MCP_MAIL_ENABLED is
-// explicitly false, LoadConfig forces MailEnabled to true. Mail management
-// is a superset of read-only mail access and must not leave MailEnabled off.
-func TestMailManageImpliesMailEnabled(t *testing.T) {
-	clearOutlookEnvVars(t)
-	t.Setenv("OUTLOOK_MCP_MAIL_ENABLED", "false")
 	t.Setenv("OUTLOOK_MCP_MAIL_MANAGE_ENABLED", "true")
-
-	cfg := LoadConfig()
-
-	if !cfg.MailManageEnabled {
-		t.Error("MailManageEnabled should be true when OUTLOOK_MCP_MAIL_MANAGE_ENABLED=true")
-	}
-	if !cfg.MailEnabled {
-		t.Error("MailEnabled should be forced to true when MailManageEnabled is true, even if OUTLOOK_MCP_MAIL_ENABLED=false")
-	}
-}
-
-// TestLoadConfig_MailManageEnabledDefault validates that MailManageEnabled
-// defaults to false when OUTLOOK_MCP_MAIL_MANAGE_ENABLED is not set.
-func TestLoadConfig_MailManageEnabledDefault(t *testing.T) {
-	clearOutlookEnvVars(t)
-
-	cfg := LoadConfig()
-
-	if cfg.MailManageEnabled {
-		t.Error("MailManageEnabled should default to false when OUTLOOK_MCP_MAIL_MANAGE_ENABLED is unset")
-	}
-}
-
-// TestLoadConfig_MailSendImpliesManageAndRead verifies the cumulative legacy
-// default flags used to derive a mail_send account profile.
-func TestLoadConfig_MailSendImpliesManageAndRead(t *testing.T) {
-	t.Setenv("OUTLOOK_MCP_MAIL_ENABLED", "false")
-	t.Setenv("OUTLOOK_MCP_MAIL_MANAGE_ENABLED", "false")
 	t.Setenv("OUTLOOK_MCP_MAIL_SEND_ENABLED", "true")
 	cfg := LoadConfig()
-	if !cfg.MailSendEnabled || !cfg.MailManageEnabled || !cfg.MailEnabled {
-		t.Fatalf("mail flags are not cumulative: send=%v manage=%v read=%v", cfg.MailSendEnabled, cfg.MailManageEnabled, cfg.MailEnabled)
+	if cfg.MailEnabled || cfg.MailManageEnabled || cfg.MailSendEnabled {
+		t.Fatalf("legacy mail flags affected config: %+v", cfg)
 	}
 }
 

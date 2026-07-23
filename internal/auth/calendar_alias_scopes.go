@@ -47,9 +47,14 @@ func ScopesForAccountConfig(account AccountConfig) []string {
 	if account.MailAliases != nil {
 		mailAliases = *account.MailAliases
 	}
-	return OAuthScopeUnion(
-		ScopesForMailPolicy(policy),
-		ScopesForCalendarAliases(aliases),
-		ScopesForMailAliases(mailAliases),
-	)
+	return RequiredScopes(calendarPolicyFromConfig(account), policy, aliases, mailAliases)
+}
+
+// calendarPolicyFromConfig returns the persisted own-calendar policy. Missing
+// legacy input fails closed to off until migration persists an explicit value.
+func calendarPolicyFromConfig(account AccountConfig) CalendarPolicy {
+	if account.CalendarPolicy == nil {
+		return CalendarPolicyOff
+	}
+	return *account.CalendarPolicy
 }

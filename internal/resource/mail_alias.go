@@ -18,6 +18,9 @@ type MailAlias struct {
 	View MailboxView `json:"view"`
 	// Policy is the target-local independent action matrix.
 	Policy MailActionPolicy `json:"policy"`
+
+	// Validation is the latest direct mailbox metadata reachability result.
+	Validation Validation `json:"validation"`
 }
 
 // NewMailAlias creates one owner-view mailbox alias with every action disabled.

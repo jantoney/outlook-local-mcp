@@ -58,11 +58,20 @@ type Target struct {
 // NewOwnTarget creates an account-bound `/me` target for one own-resource
 // family. Mail policy is retained only for own mail authorization.
 func NewOwnTarget(accountID AccountID, family TargetFamily, mailPolicy MailActionPolicy) (Target, error) {
+	return NewOwnTargetWithCalendarPolicy(accountID, family, CalendarProfileManage, mailPolicy)
+}
+
+// NewOwnTargetWithCalendarPolicy creates an account-bound `/me` target with an
+// explicit own-calendar policy. CalendarPolicyOff denies all calendar actions,
+// while read and manage use the same capability vocabulary as shared targets.
+// Mail authorization continues to use the independent mail action matrix.
+func NewOwnTargetWithCalendarPolicy(accountID AccountID, family TargetFamily, calendarPolicy CalendarProfile, mailPolicy MailActionPolicy) (Target, error) {
 	target := Target{AccountID: accountID, View: MailboxViewRecipient}
 	switch family {
 	case TargetFamilyCalendar:
 		target.ResourceID = OwnCalendarResourceID
 		target.Kind = ResourceKindOwnCalendar
+		target.CalendarProfile = calendarPolicy
 	case TargetFamilyMail:
 		target.ResourceID = OwnMailboxResourceID
 		target.Kind = ResourceKindOwnMailbox
@@ -159,7 +168,8 @@ func (t Target) Family() (TargetFamily, error) {
 func (t Target) Allows(capability TargetCapability) bool {
 	switch t.Kind {
 	case ResourceKindOwnCalendar:
-		return capability == TargetCapabilityRead || capability == TargetCapabilityManage
+		return (capability == TargetCapabilityRead && (t.CalendarProfile == CalendarProfileRead || t.CalendarProfile == CalendarProfileManage)) ||
+			(capability == TargetCapabilityManage && t.CalendarProfile == CalendarProfileManage)
 	case ResourceKindOwnerPrimaryCalendar:
 		return capability == TargetCapabilityRead && t.CalendarProfile == CalendarProfileRead
 	case ResourceKindMountedCalendar:

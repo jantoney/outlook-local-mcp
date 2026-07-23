@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -549,6 +550,9 @@ func TestCloseLogFile_FlushesAndCloses(t *testing.T) {
 // TestInitLogger_FileLogging_FilePermissions verifies that the log file
 // created by InitLogger has permissions 0600.
 func TestInitLogger_FileLogging_FilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file security is ACL-based; POSIX mode-bit assertions do not apply")
+	}
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "perms-test.log")
 
@@ -609,11 +613,11 @@ func TestInitLogger_FileLogging_StartupLogField(t *testing.T) {
 		t.Fatalf("failed to read log file: %v", err)
 	}
 
-	output := string(fileContent)
-	if !strings.Contains(output, "log_file") {
-		t.Errorf("file output should contain 'log_file' key, got: %s", output)
+	var record map[string]any
+	if err := json.Unmarshal(fileContent, &record); err != nil {
+		t.Fatalf("file output is not valid JSON: %v; output: %s", err, fileContent)
 	}
-	if !strings.Contains(output, tmpFile) {
-		t.Errorf("file output should contain the log file path, got: %s", output)
+	if got, ok := record["log_file"].(string); !ok || got != tmpFile {
+		t.Errorf("log_file = %v, want %q; output: %s", record["log_file"], tmpFile, fileContent)
 	}
 }

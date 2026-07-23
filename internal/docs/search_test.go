@@ -97,29 +97,27 @@ func TestSearch_ConceptsSlugIsSearchable(t *testing.T) {
 	}
 }
 
-// TestSearchDocs_AutoDefaultAnchor verifies that searching for "auto-default"
-// returns a result from the troubleshooting document whose snippet contains the
-// "Auto-default account" heading text, satisfying CR-0064 AC-6 and
-// docs/troubleshooting.md anchor auto-default-account.
-func TestSearchDocs_AutoDefaultAnchor(t *testing.T) {
+// TestSearchDocsSharedValidationAnchor verifies the current shared-resource
+// recovery guidance is discoverable through the embedded search surface.
+func TestSearchDocsSharedValidationAnchor(t *testing.T) {
 	t.Parallel()
 
-	results, err := docs.Search("auto-default")
+	results, err := docs.Search("shared resource is not available")
 	if err != nil {
-		t.Fatalf("Search('auto-default') error: %v", err)
+		t.Fatalf("Search(shared validation) error: %v", err)
 	}
 	if len(results) == 0 {
-		t.Fatal("Search('auto-default') returned no results")
+		t.Fatal("Search(shared validation) returned no results")
 	}
 
 	var found bool
 	for _, r := range results {
-		if r.Slug == "troubleshooting" && strings.Contains(r.Snippet, "Auto-default account") {
+		if r.Slug == "troubleshooting" && strings.Contains(r.Snippet, "Shared resource is not available") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected a result from slug 'troubleshooting' with snippet containing 'Auto-default account', got: %+v", results)
+		t.Errorf("expected shared-resource validation guidance, got: %+v", results)
 	}
 }

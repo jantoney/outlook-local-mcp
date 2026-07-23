@@ -143,16 +143,38 @@ func TestSanitizeAuditParams_PreservesNormal(t *testing.T) {
 // restores it after the test.
 func setAuditState(t *testing.T, enabled bool, writer *bytes.Buffer) {
 	t.Helper()
+	auditMu.Lock()
 	origEnabled := auditEnabled
 	origWriter := auditWriter
-	t.Cleanup(func() {
-		auditEnabled = origEnabled
-		auditWriter = origWriter
-	})
 	auditEnabled = enabled
 	if writer != nil {
 		auditWriter = writer
 	}
+	auditMu.Unlock()
+	t.Cleanup(func() {
+		auditMu.Lock()
+		defer auditMu.Unlock()
+		auditEnabled = origEnabled
+		auditWriter = origWriter
+	})
+}
+
+// preserveAuditState captures global audit state and restores it after closing
+// any file opened by the test. This is required on platforms such as Windows
+// that prevent removal of open files.
+func preserveAuditState(t *testing.T) {
+	t.Helper()
+	auditMu.Lock()
+	origEnabled := auditEnabled
+	origWriter := auditWriter
+	auditMu.Unlock()
+	t.Cleanup(func() {
+		_ = CloseAuditLog()
+		auditMu.Lock()
+		defer auditMu.Unlock()
+		auditEnabled = origEnabled
+		auditWriter = origWriter
+	})
 }
 
 // TestEmitAuditLog_JSONFormat validates that emitted entries are valid JSON with
@@ -199,12 +221,7 @@ func TestEmitAuditLog_FileOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "audit.jsonl")
 
-	origEnabled := auditEnabled
-	origWriter := auditWriter
-	t.Cleanup(func() {
-		auditEnabled = origEnabled
-		auditWriter = origWriter
-	})
+	preserveAuditState(t)
 
 	InitAuditLog(true, path)
 
@@ -303,12 +320,7 @@ func TestEmitAuditLog_FlushAfterWrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "audit-flush.jsonl")
 
-	origEnabled := auditEnabled
-	origWriter := auditWriter
-	t.Cleanup(func() {
-		auditEnabled = origEnabled
-		auditWriter = origWriter
-	})
+	preserveAuditState(t)
 
 	InitAuditLog(true, path)
 
@@ -640,12 +652,7 @@ func TestInitAuditLog_FileCreated(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "audit-init.jsonl")
 
-	origEnabled := auditEnabled
-	origWriter := auditWriter
-	t.Cleanup(func() {
-		auditEnabled = origEnabled
-		auditWriter = origWriter
-	})
+	preserveAuditState(t)
 
 	InitAuditLog(true, path)
 
@@ -657,15 +664,26 @@ func TestInitAuditLog_FileCreated(t *testing.T) {
 	}
 }
 
+// TestInitAuditLog_ReconfigurationClosesPreviousFile verifies replacing the
+// global audit destination releases the prior descriptor on every platform.
+func TestInitAuditLog_ReconfigurationClosesPreviousFile(t *testing.T) {
+	directory := t.TempDir()
+	preserveAuditState(t)
+	InitAuditLog(true, filepath.Join(directory, "first.jsonl"))
+	first, ok := auditWriter.(*os.File)
+	if !ok {
+		t.Fatalf("audit writer = %T, want file", auditWriter)
+	}
+	InitAuditLog(true, filepath.Join(directory, "second.jsonl"))
+	if _, err := first.WriteString("must fail"); err == nil {
+		t.Fatal("reconfigured audit writer left previous file open")
+	}
+}
+
 // TestInitAuditLog_InvalidPath validates that InitAuditLog falls back to stderr
 // when the file path is invalid.
 func TestInitAuditLog_InvalidPath(t *testing.T) {
-	origEnabled := auditEnabled
-	origWriter := auditWriter
-	t.Cleanup(func() {
-		auditEnabled = origEnabled
-		auditWriter = origWriter
-	})
+	preserveAuditState(t)
 
 	InitAuditLog(true, "/nonexistent/dir/audit.jsonl")
 
@@ -683,12 +701,7 @@ func TestInitAuditLog_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "should-not-exist.jsonl")
 
-	origEnabled := auditEnabled
-	origWriter := auditWriter
-	t.Cleanup(func() {
-		auditEnabled = origEnabled
-		auditWriter = origWriter
-	})
+	preserveAuditState(t)
 
 	InitAuditLog(false, path)
 

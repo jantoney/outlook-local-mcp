@@ -68,6 +68,11 @@ var wellKnownTenants = map[string]bool{
 func ValidateConfig(cfg Config) error {
 	var errs []string
 
+	if cfg.WebUIPort < 0 || cfg.WebUIPort > 65535 || (cfg.WebUIEnabled && cfg.WebUIPort == 0) {
+		slog.Error("invalid configuration", "field", "WebUIPort", "value", cfg.WebUIPort, "expected", "1-65535")
+		errs = append(errs, "WebUIPort must be between 1 and 65535")
+	}
+
 	// ClientID must be a valid UUID.
 	if !uuidRegex.MatchString(cfg.ClientID) {
 		slog.Error("invalid configuration", "field", "ClientID", "value", cfg.ClientID, "expected", "UUID format (8-4-4-4-12 hex)")

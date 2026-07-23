@@ -121,6 +121,7 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 		buildUpdateDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildDeleteDraftVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildAddAttachmentVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
+		buildRemoveAttachmentVerb(c, rc, wrapTargetWrite(mailSharedDraftItemGuard())),
 		buildMoveMessageVerb(c, rc, wrapTargetWrite(mailMoveMessageGuard())),
 		buildArchiveMessageVerb(c, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityArchive))),
 		buildTrashMessageVerb(c, wrapTargetWrite(mailReferencedMessageMutationGuard(resource.MailCapabilityTrash))),
@@ -145,7 +146,7 @@ func requiredMailCapability(name string) auth.MailCapability {
 	case "mail.send_draft":
 		return auth.MailCapabilitySend
 	case "mail.create_draft", "mail.create_reply_draft", "mail.create_forward_draft",
-		"mail.update_draft", "mail.delete_draft", "mail.add_attachment":
+		"mail.update_draft", "mail.delete_draft", "mail.add_attachment", "mail.remove_attachment":
 		return auth.MailCapabilityDraft
 	case "mail.move_message":
 		return auth.MailCapabilityMove
@@ -225,6 +226,33 @@ func buildAddAttachmentVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite f
 			mcp.WithString("draft_ref", mcp.Description("Target-bound shared draft reference.")),
 			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("file_path", mcp.Required(), mcp.Description("Local file path inside a configured attachment root.")),
+			mcp.WithString("account", mcp.Description("Account label or UPN to use.")),
+		},
+	}
+}
+
+// buildRemoveAttachmentVerb constructs the destructive draft attachment verb
+// from server dependencies, retry policy, and write middleware. It returns the
+// fully documented registry entry and has no Graph or persistence side effects.
+func buildRemoveAttachmentVerb(c mailVerbsConfig, rc graph.RetryConfig, wrapWrite func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
+	return tools.Verb{
+		Name:        "remove_attachment",
+		Summary:     "permanently remove one attachment from an own or shared draft",
+		Description: "Removes one existing attachment after confirming the parent message is still a draft. Own mail requires message_id and attachment_id. Shared mail requires shared_resource, draft_ref, and an attachment_ref bound to that draft; raw shared IDs are rejected. Requires the exact draft capability. Removal is permanent; Microsoft Graph has no atomic attachment replacement operation.",
+		SeeDocs:     []string{"concepts#independent-mail-action-policies", "concepts#local-draft-attachments"},
+		Handler:     wrapWrite("mail.remove_attachment", "delete", tools.NewHandleRemoveAttachment(rc, c.timeout, c.referenceCodec)),
+		Annotations: []mcp.ToolOption{
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(true),
+		},
+		Schema: []mcp.ToolOption{
+			mcp.WithString("message_id", mcp.Description("Own-mail draft message ID. Rejected with shared_resource.")),
+			mcp.WithString("attachment_id", mcp.Description("Own-mail attachment ID. Rejected with shared_resource.")),
+			mcp.WithString("draft_ref", mcp.Description("Target-bound shared draft reference.")),
+			mcp.WithString("attachment_ref", mcp.Description("Target-bound shared attachment reference returned by list_attachments for this draft.")),
+			mcp.WithString("shared_resource", mcp.Description("Configured shared-mail alias. Omit for own mail.")),
 			mcp.WithString("account", mcp.Description("Account label or UPN to use.")),
 		},
 	}

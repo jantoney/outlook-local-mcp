@@ -146,9 +146,9 @@ func TestTopLevelDescription_System(t *testing.T) {
 	}
 }
 
-// TestTopLevelDescription_System_CompleteAuth verifies that complete_auth
-// appears in the system description when auth_code is active (FR-2).
-func TestTopLevelDescription_System_CompleteAuth(t *testing.T) {
+// TestTopLevelDescriptionSystemOmitsCompleteAuth verifies account-scoped auth
+// completion does not leak back into the system domain.
+func TestTopLevelDescriptionSystemOmitsCompleteAuth(t *testing.T) {
 	s := buildDescriptionTestServer(t, config.Config{
 		AuthRecordPath: "/tmp/test",
 		CacheName:      "test",
@@ -156,8 +156,8 @@ func TestTopLevelDescription_System_CompleteAuth(t *testing.T) {
 	})
 	desc := getToolDescription(t, s, "system")
 
-	if !strings.Contains(desc, "complete_auth") {
-		t.Errorf("system description missing verb %q when auth_code active\n  got: %s", "complete_auth", desc)
+	if strings.Contains(desc, "complete_auth") {
+		t.Errorf("system description unexpectedly contains complete_auth\n  got: %s", desc)
 	}
 }
 
@@ -223,6 +223,7 @@ func TestTopLevelDescription_Mail_ManageEnabled(t *testing.T) {
 		"create_forward_draft",
 		"update_draft",
 		"delete_draft",
+		"remove_attachment",
 	}
 	for _, verb := range draftVerbs {
 		if !strings.Contains(desc, verb) {

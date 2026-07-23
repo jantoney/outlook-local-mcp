@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -16,6 +17,15 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/desek/outlook-local-mcp/internal/config"
 )
+
+// requirePOSIXModeBits skips permission-bit assertions on Windows, where Go's
+// FileMode reports synthesized DOS permissions and access control is ACL-based.
+func requirePOSIXModeBits(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file security is ACL-based; POSIX mode-bit assertions do not apply")
+	}
+}
 
 // testRecord returns a populated AuthenticationRecord for use in tests.
 // The values are synthetic and do not correspond to a real Entra ID account.
@@ -82,6 +92,7 @@ func TestLoadAuthRecord_InvalidJSON(t *testing.T) {
 // TestSaveAuthRecord_CreatesDirectory validates that SaveAuthRecord creates the
 // parent directory with permissions 0700 when it does not already exist.
 func TestSaveAuthRecord_CreatesDirectory(t *testing.T) {
+	requirePOSIXModeBits(t)
 	dir := filepath.Join(t.TempDir(), "newdir", "subdir")
 	path := filepath.Join(dir, "auth_record.json")
 
@@ -106,6 +117,7 @@ func TestSaveAuthRecord_CreatesDirectory(t *testing.T) {
 // TestSaveAuthRecord_FilePermissions validates that the auth record file is
 // written with permissions 0600 (owner read/write only).
 func TestSaveAuthRecord_FilePermissions(t *testing.T) {
+	requirePOSIXModeBits(t)
 	path := filepath.Join(t.TempDir(), "auth_record.json")
 
 	record := testRecord()
@@ -195,6 +207,25 @@ func TestUserPrompt_WritesToStderr(t *testing.T) {
 	}
 	if stderrBuf.String() != msg.Message+"\n" {
 		t.Errorf("stderr = %q, want %q", stderrBuf.String(), msg.Message+"\n")
+	}
+}
+
+// TestDeviceCodeUserPromptPublishesStructuredDetails verifies web adapters can
+// render the provider URL and code without parsing a localized message.
+func TestDeviceCodeUserPromptPublishesStructuredDetails(t *testing.T) {
+	details := make(chan DeviceCodeDetails, 1)
+	ctx := context.WithValue(context.Background(), DeviceCodeDetailsKey, details)
+	message := azidentity.DeviceCodeMessage{
+		VerificationURL: "https://microsoft.com/devicelogin",
+		UserCode:        "ABCD-EFGH",
+		Message:         "Open the page and enter the code.",
+	}
+	if err := deviceCodeUserPrompt(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	got := <-details
+	if got.VerificationURL != message.VerificationURL || got.UserCode != message.UserCode || got.Message != message.Message {
+		t.Fatalf("structured device instructions = %+v, want %+v", got, message)
 	}
 }
 
@@ -541,17 +572,14 @@ func TestSetupCredentialForAccount_InvalidMethod(t *testing.T) {
 	}
 }
 
-// TestScopes_CalendarOnly validates that Scopes returns identity and calendar
-// scopes when mail is disabled.
+// TestScopes_CalendarOnly validates that the legacy helper contributes no
+// scopes when mail is disabled; account-wide scope construction owns User.Read.
 func TestScopes_CalendarOnly(t *testing.T) {
 	cfg := config.Config{MailEnabled: false}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 2 {
-		t.Fatalf("Scopes() returned %d scopes, want 2", len(scopes))
-	}
-	if scopes[0] != "User.Read" || scopes[1] != "Calendars.ReadWrite" {
-		t.Errorf("Scopes() = %v, want User.Read and Calendars.ReadWrite", scopes)
+	if len(scopes) != 0 {
+		t.Fatalf("Scopes() returned %v, want no legacy scopes", scopes)
 	}
 }
 
@@ -561,14 +589,8 @@ func TestScopes_WithMail(t *testing.T) {
 	cfg := config.Config{MailEnabled: true}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 3 {
-		t.Fatalf("Scopes() returned %d scopes, want 3", len(scopes))
-	}
-	if scopes[0] != "User.Read" || scopes[1] != "Calendars.ReadWrite" {
-		t.Errorf("Scopes() identity/calendar prefix = %v", scopes[:2])
-	}
-	if scopes[2] != "Mail.Read" {
-		t.Errorf("Scopes()[2] = %q, want %q", scopes[2], "Mail.Read")
+	if len(scopes) != 1 || scopes[0] != "Mail.Read" {
+		t.Errorf("Scopes() = %v, want Mail.Read", scopes)
 	}
 }
 
@@ -578,14 +600,8 @@ func TestScopes_MailManage(t *testing.T) {
 	cfg := config.Config{MailEnabled: true, MailManageEnabled: true}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 3 {
-		t.Fatalf("Scopes() returned %d scopes, want 3", len(scopes))
-	}
-	if scopes[0] != "User.Read" || scopes[1] != "Calendars.ReadWrite" {
-		t.Errorf("Scopes() identity/calendar prefix = %v", scopes[:2])
-	}
-	if scopes[2] != "Mail.ReadWrite" {
-		t.Errorf("Scopes()[2] = %q, want %q", scopes[2], "Mail.ReadWrite")
+	if len(scopes) != 1 || scopes[0] != "Mail.ReadWrite" {
+		t.Errorf("Scopes() = %v, want Mail.ReadWrite", scopes)
 	}
 	for _, s := range scopes {
 		if s == "Mail.Read" {

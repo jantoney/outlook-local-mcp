@@ -341,20 +341,10 @@ func (s *accountResolverState) elicitAccountSelection(ctx context.Context) (*Acc
 
 	result, err := s.elicit(ctx, elicitationRequest)
 	if err != nil {
-		// Fall back to "default" account on any elicitation error.
-		slog.Warn("elicitation failed, falling back to default account", "error", err)
-		entry, found := s.registry.Get("default")
-		if !found {
-			return nil, fmt.Errorf(
-				"multiple accounts registered (%s) but elicitation is not available and no "+
-					"\"default\" account exists. Specify the account explicitly using the "+
-					"'account' parameter",
-				strings.Join(s.registry.Labels(), ", "))
-		}
-		if !entry.Authenticated {
-			return nil, disconnectedExplicitError(entry)
-		}
-		return entry, nil
+		slog.Warn("account elicitation unavailable; explicit selection required", "error", err)
+		return nil, fmt.Errorf(
+			"multiple accounts registered (%s) but elicitation is unavailable. Specify the account explicitly using the 'account' parameter",
+			strings.Join(s.registry.Labels(), ", "))
 	}
 
 	switch result.Action {

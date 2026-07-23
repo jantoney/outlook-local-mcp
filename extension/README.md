@@ -4,7 +4,7 @@ Manage Microsoft Outlook calendars and events directly from Claude. This extensi
 
 ## Requirements
 
-This extension requires the **Calendars.ReadWrite** Microsoft Graph API scope. On first use, you will be prompted to authenticate with your Microsoft account and grant this permission. When mail access is enabled (`OUTLOOK_MCP_MAIL_ENABLED=true`), the **Mail.Read** scope is additionally requested for read-only email access (see CR-0043).
+Every configured account requires **User.Read** to resolve the signed-in identity. Calendar and mail scopes are requested only when their explicit per-account permissions are enabled: calendar read uses `Calendars.Read`, calendar manage uses `Calendars.ReadWrite`, and mail actions add only their required scopes. Permission changes that alter the scope union require re-authentication.
 
 ## Configuration
 
