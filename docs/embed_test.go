@@ -107,7 +107,7 @@ var knownVerbNames = []string{
 	"reschedule_event", "create_meeting", "update_meeting", "cancel_meeting",
 	"reschedule_meeting", "get_free_busy",
 	// mail
-	"list_folders", "list_messages", "get_message", "search_messages",
+	"list_categories", "list_folders", "list_messages", "get_message", "search_messages",
 	"get_conversation", "list_attachments", "get_attachment",
 	"create_draft", "create_reply_draft", "create_forward_draft",
 	"update_draft", "delete_draft",

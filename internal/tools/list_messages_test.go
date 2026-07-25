@@ -43,7 +43,7 @@ func TestListMessagesTool_HasParameters(t *testing.T) {
 	expectedParams := []string{
 		"folder_id", "start_datetime", "end_datetime", "from",
 		"conversation_id", "is_read", "is_draft", "has_attachments",
-		"importance", "flag_status",
+		"importance", "flag_status", "categories", "category_match",
 		"max_results", "timezone", "account", "output",
 	}
 	for _, param := range expectedParams {
@@ -225,6 +225,21 @@ func TestListMessages_ImportanceFilter(t *testing.T) {
 func TestListMessages_FlagStatusFilter(t *testing.T) {
 	filter := buildMessageFilter(messageFilterOptions{flagStatus: "flagged"})
 	expected := "flag/flagStatus eq 'flagged'"
+	if filter != expected {
+		t.Errorf("filter = %q, want %q", filter, expected)
+	}
+}
+
+// TestListMessages_CategoryFilter validates category predicates combine with
+// existing structured message filters.
+func TestListMessages_CategoryFilter(t *testing.T) {
+	filter := buildMessageFilter(messageFilterOptions{
+		startDatetime: "2026-04-01T00:00:00Z",
+		categories:    []string{"INVOICE - UNPAID", "To include in TAX"},
+		categoryMatch: "all",
+	})
+	expected := "receivedDateTime ge 2026-04-01T00:00:00Z and " +
+		"(categories/any(c0:c0 eq 'INVOICE - UNPAID') and categories/any(c1:c1 eq 'To include in TAX'))"
 	if filter != expected {
 		t.Errorf("filter = %q, want %q", filter, expected)
 	}

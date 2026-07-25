@@ -2,6 +2,15 @@ package server
 
 import "github.com/desek/outlook-local-mcp/internal/resource"
 
+// mailOwnReadGuard authorizes read operations that are defined only for the
+// selected account's own mailbox and rejects shared-mail aliases.
+func mailOwnReadGuard() TargetGuardConfig {
+	return TargetGuardConfig{
+		Family: resource.TargetFamilyMail, Capability: resource.TargetCapabilityRead,
+		AllowedKinds: []resource.ResourceKind{resource.ResourceKindOwnMailbox},
+	}
+}
+
 // mailSharedReadGuard authorizes own-mail and organizational shared-mail reads.
 func mailSharedReadGuard() TargetGuardConfig {
 	return TargetGuardConfig{

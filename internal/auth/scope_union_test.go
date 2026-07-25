@@ -11,14 +11,14 @@ func TestOAuthScopeUnion(t *testing.T) {
 	t.Parallel()
 
 	left := OAuthScopeUnion(
-		[]string{"Mail.Send", "User.Read", "Mail.Read.Shared"},
+		[]string{"Mail.Send", "User.Read", "Mail.Read.Shared", "MailboxSettings.Read"},
 		[]string{"Calendars.ReadWrite", "Mail.Send", "Mail.Read"},
 	)
 	right := OAuthScopeUnion(
-		[]string{"Mail.Read", "Calendars.ReadWrite"},
+		[]string{"Mail.Read", "Calendars.ReadWrite", "MailboxSettings.Read"},
 		[]string{"Mail.Read.Shared", "User.Read", "Mail.Send"},
 	)
-	want := []string{"User.Read", "Calendars.ReadWrite", "Mail.Read", "Mail.Read.Shared", "Mail.Send"}
+	want := []string{"User.Read", "Calendars.ReadWrite", "MailboxSettings.Read", "Mail.Read", "Mail.Read.Shared", "Mail.Send"}
 	if !slices.Equal(left, want) {
 		t.Fatalf("OAuthScopeUnion() = %v, want %v", left, want)
 	}

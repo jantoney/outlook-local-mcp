@@ -8,6 +8,7 @@ var canonicalOAuthScopeOrder = map[string]int{
 	"Calendars.ReadWrite":        11,
 	"Calendars.Read.Shared":      12,
 	"Calendars.ReadWrite.Shared": 13,
+	"MailboxSettings.Read":       19,
 	"Mail.Read":                  20,
 	"Mail.Read.Shared":           21,
 	"Mail.ReadWrite":             22,

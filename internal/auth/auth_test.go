@@ -583,25 +583,25 @@ func TestScopes_CalendarOnly(t *testing.T) {
 	}
 }
 
-// TestScopes_WithMail validates that Scopes returns both calendar and mail
-// scopes when MailEnabled is true.
+// TestScopes_WithMail validates that Scopes returns mail read and category
+// settings scopes when MailEnabled is true.
 func TestScopes_WithMail(t *testing.T) {
 	cfg := config.Config{MailEnabled: true}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 1 || scopes[0] != "Mail.Read" {
-		t.Errorf("Scopes() = %v, want Mail.Read", scopes)
+	if len(scopes) != 2 || scopes[0] != "MailboxSettings.Read" || scopes[1] != "Mail.Read" {
+		t.Errorf("Scopes() = %v, want MailboxSettings.Read and Mail.Read", scopes)
 	}
 }
 
-// TestScopes_MailManage validates that Scopes returns calendar + Mail.ReadWrite
-// (and not Mail.Read) when MailManageEnabled is true.
+// TestScopes_MailManage validates that Scopes returns category settings plus
+// Mail.ReadWrite (and not Mail.Read) when MailManageEnabled is true.
 func TestScopes_MailManage(t *testing.T) {
 	cfg := config.Config{MailEnabled: true, MailManageEnabled: true}
 	scopes := Scopes(cfg)
 
-	if len(scopes) != 1 || scopes[0] != "Mail.ReadWrite" {
-		t.Errorf("Scopes() = %v, want Mail.ReadWrite", scopes)
+	if len(scopes) != 2 || scopes[0] != "MailboxSettings.Read" || scopes[1] != "Mail.ReadWrite" {
+		t.Errorf("Scopes() = %v, want MailboxSettings.Read and Mail.ReadWrite", scopes)
 	}
 	for _, s := range scopes {
 		if s == "Mail.Read" {

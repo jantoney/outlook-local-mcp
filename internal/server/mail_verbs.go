@@ -108,6 +108,7 @@ func buildMailVerbs(c mailVerbsConfig) ([]tools.Verb, *tools.VerbRegistry) {
 
 	verbs := []tools.Verb{
 		help.NewHelpVerb(registryPtr),
+		buildListCategoriesVerb(c, rc, wrapTarget(mailOwnReadGuard())),
 		buildListFoldersVerb(c, rc, wrapTarget(mailSharedReadGuard())),
 		buildListMessagesVerb(c, rc, wrapTarget(mailSharedFolderReadGuard())),
 		buildGetMessageVerb(c, rc, wrapTarget(mailSharedMessageReadGuard())),
@@ -160,6 +161,38 @@ func requiredMailCapability(name string) auth.MailCapability {
 		return auth.MailCapabilityPermanentDelete
 	default:
 		return auth.MailCapabilityRead
+	}
+}
+
+// buildListCategoriesVerb constructs the own-mail master-category discovery
+// verb. It has no shared_resource parameter because message delegation does not
+// grant access to another mailbox owner's settings.
+func buildListCategoriesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
+	return tools.Verb{
+		Name:        "list_categories",
+		Summary:     "list the selected account's Outlook category names and colors",
+		Description: "Lists the selected account's complete Outlook master category definitions without scanning messages. Returns display names and preset colors. Own mail only: shared mailbox message delegation does not authorize another owner's mailbox settings. Use exact returned names with list_messages categories.",
+		Examples: []tools.Example{
+			{Args: map[string]any{}, Comment: "list every defined Outlook category"},
+			{Args: map[string]any{"output": "summary"}, Comment: "return compact structured names and colors"},
+		},
+		SeeDocs: []string{"concepts#mail-category-discovery-and-filtering"},
+		Handler: wrap("mail.list_categories", "read", tools.NewHandleListCategories(rc, c.timeout)),
+		Annotations: []mcp.ToolOption{
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(true),
+		},
+		Schema: []mcp.ToolOption{
+			mcp.WithString("account",
+				mcp.Description("Account label or UPN to use. Omit to auto-select the default account."),
+			),
+			mcp.WithString("output",
+				mcp.Description("Output mode: 'text' (default), 'summary', or 'raw'."),
+				mcp.Enum("text", "summary", "raw"),
+			),
+		},
 	}
 }
 
@@ -294,13 +327,14 @@ func buildListFoldersVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(str
 func buildListMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(string, string, mcpserver.ToolHandlerFunc) tools.Handler) tools.Verb {
 	return tools.Verb{
 		Name:        "list_messages",
-		Summary:     "list messages in a folder or across all folders; filter by date, sender, thread",
-		Description: "Lists messages in an own or organizational shared mailbox. Shared results include references; set include_refs=true to opt into the same signed references for own-mail move_message without changing default own output. Raw keeps provenance in a sidecar. Results include bodyPreview; full body requires get_message output=raw.",
+		Summary:     "list messages; filter by folder, date, sender, thread, or category",
+		Description: "Lists messages in an own or organizational shared mailbox. Use categories with exact names from list_categories and category_match=any or all. Shared results include references; set include_refs=true to opt into the same signed references for own-mail move_message without changing default own output. Raw keeps provenance in a sidecar. Results include bodyPreview; full body requires get_message output=raw.",
 		Examples: []tools.Example{
 			{Args: map[string]any{"folder_id": "Inbox", "is_read": false}, Comment: "list unread messages in inbox"},
 			{Args: map[string]any{"from": "alice@contoso.com", "max_results": 10}, Comment: "list recent messages from a sender"},
+			{Args: map[string]any{"categories": "INVOICE - UNPAID,To include in TAX", "category_match": "any"}, Comment: "list messages with either exact category"},
 		},
-		SeeDocs: []string{"concepts#output-tiers", "concepts#independent-mail-action-policies", "concepts#shared-mail-aliases"},
+		SeeDocs: []string{"concepts#output-tiers", "concepts#independent-mail-action-policies", "concepts#shared-mail-aliases", "concepts#mail-category-discovery-and-filtering"},
 		Handler: wrap("mail.list_messages", "read", tools.NewHandleListMessages(rc, c.timeout, c.provenancePropertyID, c.referenceCodec)),
 		Annotations: []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
@@ -326,6 +360,13 @@ func buildListMessagesVerb(c mailVerbsConfig, rc graph.RetryConfig, wrap func(st
 			),
 			mcp.WithString("conversation_id",
 				mcp.Description("Conversation ID to retrieve all messages in a thread."),
+			),
+			mcp.WithString("categories",
+				mcp.Description("Comma-separated exact Outlook category names. Use list_categories to discover names."),
+			),
+			mcp.WithString("category_match",
+				mcp.Description("Category matching mode: 'any' (default) or 'all'."),
+				mcp.Enum("any", "all"),
 			),
 			mcp.WithBoolean("is_read",
 				mcp.Description("Filter by read/unread state. Omit to include both."),

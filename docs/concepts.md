@@ -56,7 +56,7 @@ The mail schema is stable at startup. Each account's own mailbox has independent
 
 `account.list` and `system.status` show the effective matrix. Use `account.set_permissions` to replace the complete own-calendar and own-mail policy, or `account.set_mail_policy` for a partial mail-only edit. New accounts start with optional access off. Legacy mail-profile inputs and global mail feature flags are not permission sources.
 
-OAuth scopes are derived from the enabled actions. Read alone contributes `Mail.Read`; draft or any filing/deletion action contributes `Mail.ReadWrite`; send contributes `Mail.ReadWrite` and `Mail.Send`. A policy change applies locally on the next request. The account disconnects and clears local authentication only when the required scope set changes; same-scope policy edits keep the session connected. Microsoft consent is not revoked automatically.
+OAuth scopes are derived from the enabled actions. Read alone contributes `Mail.Read` and `MailboxSettings.Read`; draft or any filing/deletion action contributes `Mail.ReadWrite`; send contributes `Mail.ReadWrite` and `Mail.Send`. `MailboxSettings.Read` is included only when own-mail read is enabled so `mail.list_categories` can read the signed-in account's master category definitions. A policy change applies locally on the next request. The account disconnects and clears local authentication only when the required scope set changes; same-scope policy edits keep the session connected. Microsoft consent is not revoked automatically.
 
 ## Token tenant context and OAuth scope union
 
@@ -122,6 +122,12 @@ Call `list_folders` with `include_refs=true` to resolve the mailbox's well-known
 
 `mail.restore_message` first verifies that the referenced message is currently in Deleted Items, then accepts only a same-target destination classified as ordinary. It does not restore from Recoverable Items. `mail.permanent_delete_message` is a distinct destructive Graph action: even when explicitly enabled, every single message requires fresh MCP human confirmation bound to the unchanged message and exact target. Outlook clients cannot recover it, although retention or legal hold may still apply. Permanent deletion is never retried after an ambiguous response.
 
+## Mail category discovery and filtering
+
+`mail.list_categories` reads the selected account's Outlook master category definitions directly from `/me/outlook/masterCategories`; it does not scan or inspect messages. Text output lists names and preset colors, summary returns only `displayName` and `color`, and raw adds the Graph category `id`. The verb requires the own-mail `read` action and delegated `MailboxSettings.Read`. Shared-mail selection is rejected because message delegation does not establish authority to read another mailbox owner's settings.
+
+`mail.list_messages` accepts `categories` as comma-separated exact display names. The default `category_match=any` returns messages carrying at least one requested category; `category_match=all` requires every requested category. Category predicates execute server-side and combine with existing folder, date, sender, state, attachment, importance, flag, and provenance filters. Message category filtering works for both own mail and an authorized shared-mail alias. Call `list_categories` first when the exact own-mail spelling is unknown.
+
 ## Confirmed draft send
 
 `mail.send_draft` requires the exact `send` capability and accepts only an existing draft. Draft capability does not imply send. Own mail retains its existing draft-ID flow and makes one non-retried POST after confirmation; a timeout, connection loss, 429, or 5xx after dispatch is uncertain and requires inspecting Drafts and Sent Items before a fresh review. Shared mail requires `shared_resource` plus a target-bound `draft_ref`; raw IDs cannot reach the owner route.
@@ -149,7 +155,7 @@ The server requests scopes incrementally. Expanding mail access after initial co
 | Own calendar `read` | `Calendars.Read` |
 | Own calendar `manage` | `Calendars.ReadWrite` |
 | Account identity (always active) | `User.Read` |
-| Own-mail `read` only | `Mail.Read` |
+| Own-mail `read` only | `Mail.Read`, `MailboxSettings.Read` |
 | Any draft, filing, recovery, or deletion action | `Mail.ReadWrite` |
 | Own-mail `send` | `Mail.ReadWrite`, `Mail.Send` |
 | Shared calendar `read` | `Calendars.Read.Shared` |

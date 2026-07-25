@@ -23,7 +23,7 @@ func TestScopesForAccountConfig(t *testing.T) {
 		MailPolicy:      &policy,
 		CalendarAliases: &aliases,
 	}
-	want := []string{"User.Read", "Calendars.ReadWrite", "Calendars.Read.Shared", "Calendars.ReadWrite.Shared", "Mail.Read"}
+	want := []string{"User.Read", "Calendars.ReadWrite", "Calendars.Read.Shared", "Calendars.ReadWrite.Shared", "MailboxSettings.Read", "Mail.Read"}
 	if got := ScopesForAccountConfig(account); !slices.Equal(got, want) {
 		t.Fatalf("ScopesForAccountConfig() = %v, want %v", got, want)
 	}

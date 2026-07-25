@@ -569,8 +569,20 @@ Use the selected account's `mail_policy` from Step 1. If `read` is false, **skip
 
 **30a.** Call `{tool: "mail", args: {operation: "help"}}` to discover available mail verbs.
 
-- **Verify:** The response is plain text listing at minimum `help`, `list_folders`, `list_messages`, `get_message`, `search_messages`.
+- **Verify:** The response is plain text listing at minimum `help`, `list_categories`, `list_folders`, `list_messages`, `get_message`, `search_messages`.
 - **Purpose:** Exercises the help verb for the mail domain (AC-2 / FR-15).
+
+**30a1.** Call `{tool: "mail", args: {operation: "list_categories"}}`, then repeat with `output: "summary"` and `output: "raw"`.
+
+- **Verify:** All three calls use the selected account's own `/me/outlook/masterCategories` route and do not enumerate messages.
+- **Verify:** Text lists category names and colors; summary contains only `displayName` and `color`; raw also contains `id`.
+- **Record:** One exact returned category name if any exist. If the master list is empty, record the category-filter step as SKIP.
+
+**30a2.** When a category was recorded, call `{tool: "mail", args: {operation: "list_messages", categories: "<recorded category>", category_match: "any"}}`. If two category names are available, repeat with both comma-separated and `category_match: "all"`.
+
+- **Verify:** Every returned message contains the required category match.
+- **Verify:** Combining the category with a date boundary keeps both predicates.
+- **Fail:** If the server scans messages to discover category names, ignores a category predicate, or accepts a shared alias for `list_categories`.
 
 Call `{tool: "mail", args: {operation: "list_messages", ...}}` four times with the following filter combinations and record whether each call returns plain text, a sensible total count, and the expected filtering behavior:
 
@@ -735,6 +747,8 @@ After all steps, print a summary table. Every row **MUST** include a short `Comm
 | 29   | Log back in non-default account   | PASS/FAIL/SKIP | e.g., "only default authenticated" or "re-authenticated" |
 | 29a  | Durable account removal           | PASS/FAIL/SKIP | e.g., "single-account mode" or "label absent after restart" |
 | 30a  | Discover mail verbs (help)        | PASS/FAIL/SKIP | e.g., "mail disabled" or "all verbs listed"              |
+| 30a1 | List Outlook categories           | PASS/FAIL/SKIP | e.g., "master list returned without scanning messages"   |
+| 30a2 | Mail category filter              | PASS/FAIL/SKIP | e.g., "exact category predicate honored"                 |
 | 30b  | Mail list is_read filter          | PASS/FAIL/SKIP | e.g., "unread filter honored"                            |
 | 30c  | Mail list flag_status filter      | PASS/FAIL/SKIP | e.g., "flagged filter honored"                           |
 | 30d  | Mail list provenance filter       | PASS/FAIL/SKIP | e.g., "provenance filter returned 0 MCP messages"        |

@@ -201,7 +201,7 @@ All environment variables are prefixed with `OUTLOOK_MCP_`:
 
 ### Using an app registration you own
 
-For predictable work, school, and personal account support, create a Microsoft identity platform public-client registration with **Accounts in any organizational directory and personal Microsoft accounts** (`AzureADandPersonalMicrosoftAccount`) and access-token version 2. `User.Read` is required. Add only the delegated permissions you intend to enable: `Calendars.Read` or `Calendars.ReadWrite` for own calendar access, plus the relevant mail/shared scopes. Enable public-client flows, add the mobile/desktop redirect URIs `http://localhost` and `https://login.microsoftonline.com/common/oauth2/nativeclient`, and do not create a client secret. Set `OUTLOOK_MCP_CLIENT_ID` to that application ID and keep `OUTLOOK_MCP_TENANT_ID=common` to allow both organizational and personal accounts.
+For predictable work, school, and personal account support, create a Microsoft identity platform public-client registration with **Accounts in any organizational directory and personal Microsoft accounts** (`AzureADandPersonalMicrosoftAccount`) and access-token version 2. `User.Read` is required. Add only the delegated permissions you intend to enable: `Calendars.Read` or `Calendars.ReadWrite` for own calendar access, `MailboxSettings.Read` for own Outlook category discovery, plus the relevant mail/shared scopes. Enable public-client flows, add the mobile/desktop redirect URIs `http://localhost` and `https://login.microsoftonline.com/common/oauth2/nativeclient`, and do not create a client secret. Set `OUTLOOK_MCP_CLIENT_ID` to that application ID and keep `OUTLOOK_MCP_TENANT_ID=common` to allow both organizational and personal accounts.
 
 ## Getting help in-session
 

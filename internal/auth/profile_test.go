@@ -79,9 +79,9 @@ func TestScopesForProfile(t *testing.T) {
 		want    []string
 	}{
 		{"calendar only", MailProfileCalendarOnly, nil},
-		{"mail read", MailProfileRead, []string{"Mail.Read"}},
-		{"mail manage", MailProfileManage, []string{"Mail.ReadWrite"}},
-		{"mail send", MailProfileSend, []string{"Mail.ReadWrite", "Mail.Send"}},
+		{"mail read", MailProfileRead, []string{"MailboxSettings.Read", "Mail.Read"}},
+		{"mail manage", MailProfileManage, []string{"MailboxSettings.Read", "Mail.ReadWrite"}},
+		{"mail send", MailProfileSend, []string{"MailboxSettings.Read", "Mail.ReadWrite", "Mail.Send"}},
 	}
 
 	for _, tt := range tests {
@@ -111,10 +111,11 @@ func TestScopesForMailPolicy(t *testing.T) {
 		want   []string
 	}{
 		{"disabled", MailActionPolicy{}, nil},
-		{"read", MailActionPolicy{Read: true}, []string{"Mail.Read"}},
+		{"read", MailActionPolicy{Read: true}, []string{"MailboxSettings.Read", "Mail.Read"}},
 		{"draft", MailActionPolicy{Draft: true}, []string{"Mail.ReadWrite"}},
 		{"filing", MailActionPolicy{Archive: true}, []string{"Mail.ReadWrite"}},
-		{"send", MailActionPolicy{Send: true}, []string{"Mail.ReadWrite", "Mail.Send"}},
+		{"read and draft", MailActionPolicy{Read: true, Draft: true}, []string{"MailboxSettings.Read", "Mail.ReadWrite"}},
+		{"send", MailActionPolicy{Read: true, Send: true}, []string{"MailboxSettings.Read", "Mail.ReadWrite", "Mail.Send"}},
 	}
 
 	for _, test := range tests {

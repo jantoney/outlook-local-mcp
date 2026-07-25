@@ -174,6 +174,7 @@ func TestTopLevelDescription_Mail_AlwaysOn(t *testing.T) {
 
 	alwaysOn := []string{
 		"help",
+		"list_categories",
 		"list_folders",
 		"list_messages",
 		"get_message",

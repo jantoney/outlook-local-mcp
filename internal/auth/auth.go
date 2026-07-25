@@ -34,6 +34,10 @@ const mailReadWriteScope = "Mail.ReadWrite"
 // risk profile enables that capability.
 const mailSendScope = "Mail.Send"
 
+// mailboxSettingsReadScope permits reading the signed-in user's Outlook master
+// category definitions without granting mailbox-settings write access.
+const mailboxSettingsReadScope = "MailboxSettings.Read"
+
 // Scopes returns the OAuth scope slice based on the application configuration.
 // The calendar scope is always included. Mail scopes are selected according to
 // configuration:

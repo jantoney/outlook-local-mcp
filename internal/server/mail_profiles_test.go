@@ -16,7 +16,7 @@ func TestBuildMailVerbsIsStaticAndDeclaresCapabilities(t *testing.T) {
 	identity := func(handler mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc { return handler }
 	verbs, _ := buildMailVerbs(mailVerbsConfig{cfg: config.Config{}, authMW: identity, accountResolverMW: identity})
 	want := map[string]auth.MailCapability{
-		"list_folders": auth.MailCapabilityRead, "list_messages": auth.MailCapabilityRead,
+		"list_categories": auth.MailCapabilityRead, "list_folders": auth.MailCapabilityRead, "list_messages": auth.MailCapabilityRead,
 		"get_message": auth.MailCapabilityRead, "search_messages": auth.MailCapabilityRead,
 		"get_conversation": auth.MailCapabilityRead, "list_attachments": auth.MailCapabilityRead,
 		"get_attachment": auth.MailCapabilityRead, "create_draft": auth.MailCapabilityDraft,
@@ -40,6 +40,21 @@ func TestBuildMailVerbsIsStaticAndDeclaresCapabilities(t *testing.T) {
 	}
 	if len(seen) != len(want) {
 		t.Fatalf("registered verbs = %v, want %d profile-gated verbs", seen, len(want))
+	}
+}
+
+// TestCR0072ListCategoriesAnnotations verifies category discovery explicitly
+// declares read-only, non-destructive, idempotent, open-world semantics.
+func TestCR0072ListCategoriesAnnotations(t *testing.T) {
+	identity := func(handler mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc { return handler }
+	verbs, _ := buildMailVerbs(mailVerbsConfig{cfg: config.Config{}, authMW: identity, accountResolverMW: identity})
+	verb := calendarVerbByName(t, verbs, "list_categories")
+	annotations := mcp.NewTool(verb.Name, verb.Annotations...).Annotations
+	if annotations.ReadOnlyHint == nil || !*annotations.ReadOnlyHint ||
+		annotations.DestructiveHint == nil || *annotations.DestructiveHint ||
+		annotations.IdempotentHint == nil || !*annotations.IdempotentHint ||
+		annotations.OpenWorldHint == nil || !*annotations.OpenWorldHint {
+		t.Fatalf("list_categories annotations = %+v", annotations)
 	}
 }
 

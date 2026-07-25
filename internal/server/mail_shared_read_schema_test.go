@@ -55,3 +55,25 @@ func TestSharedMailReadSchemaIsStatic(t *testing.T) {
 		}
 	}
 }
+
+// TestMailCategorySchemas verifies master-category discovery remains own-only
+// while message category filters remain available on shared reads.
+func TestMailCategorySchemas(t *testing.T) {
+	identity := func(handler mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc { return handler }
+	verbs, _ := buildMailVerbs(mailVerbsConfig{
+		registry: auth.NewAccountRegistry(), retryCfg: graph.RetryConfig{}, cfg: config.Config{},
+		authMW: identity, accountResolverMW: identity,
+	})
+
+	listCategories := mcp.NewTool("list_categories", calendarVerbByName(t, verbs, "list_categories").Schema...)
+	if _, ok := listCategories.InputSchema.Properties["shared_resource"]; ok {
+		t.Fatal("list_categories must not advertise shared_resource")
+	}
+
+	listMessages := mcp.NewTool("list_messages", calendarVerbByName(t, verbs, "list_messages").Schema...)
+	for _, name := range []string{"categories", "category_match"} {
+		if _, ok := listMessages.InputSchema.Properties[name]; !ok {
+			t.Fatalf("list_messages schema missing %s", name)
+		}
+	}
+}

@@ -60,6 +60,8 @@ var listMessagesFullSelectFields = []string{
 //   - end_datetime: optional end of date range filter (ISO 8601).
 //   - from: optional sender email address filter.
 //   - conversation_id: optional conversation ID for thread retrieval.
+//   - categories: optional comma-separated exact category display names.
+//   - category_match: optional category mode, "any" (default) or "all".
 //   - max_results: optional maximum number of messages (default 25, max 100).
 //   - timezone: optional IANA timezone for the Prefer header.
 //   - account: optional account label for multi-account selection.
@@ -88,6 +90,13 @@ func NewListMessagesTool() mcp.Tool {
 		),
 		mcp.WithString("conversation_id",
 			mcp.Description("Conversation ID to retrieve all messages in a thread. Use a conversationId from a previous message result."),
+		),
+		mcp.WithString("categories",
+			mcp.Description("Comma-separated exact Outlook category names. Use mail.list_categories to discover names."),
+		),
+		mcp.WithString("category_match",
+			mcp.Description("Category matching mode: 'any' (default) matches at least one requested category; 'all' requires every requested category."),
+			mcp.Enum("any", "all"),
 		),
 		mcp.WithBoolean("is_read",
 			mcp.Description("Filter by read/unread state. true returns only read messages, false returns only unread messages. Omit to include both."),
@@ -227,6 +236,14 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 			}
 		}
 
+		categories, categoryMatch, err := parseMessageCategoryFilter(
+			request.GetString("categories", ""),
+			request.GetString("category_match", ""),
+		)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
 		filterOpts := messageFilterOptions{
 			startDatetime:  startDatetime,
 			endDatetime:    endDatetime,
@@ -234,6 +251,8 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 			conversationID: conversationID,
 			importance:     importance,
 			flagStatus:     flagStatus,
+			categories:     categories,
+			categoryMatch:  categoryMatch,
 		}
 		if v, ok := getBoolArg(request, "is_read"); ok {
 			filterOpts.isRead = &v
@@ -276,6 +295,8 @@ func NewHandleListMessages(retryCfg graph.RetryConfig, timeout time.Duration, pr
 			"end_datetime", endDatetime,
 			"from", fromEmail,
 			"conversation_id", conversationID,
+			"categories", categories,
+			"category_match", categoryMatch,
 			"max_results", maxResults,
 			"filter", filter)
 
@@ -451,6 +472,8 @@ type messageFilterOptions struct {
 	conversationID       string
 	importance           string
 	flagStatus           string
+	categories           []string
+	categoryMatch        string
 	isRead               *bool
 	isDraft              *bool
 	hasAttachments       *bool
@@ -498,6 +521,9 @@ func buildMessageFilter(o messageFilterOptions) string {
 			o.provenancePropertyID,
 		))
 	}
+	if categoryFilter := buildMessageCategoryFilter(o.categories, o.categoryMatch); categoryFilter != "" {
+		parts = append(parts, categoryFilter)
+	}
 
 	return strings.Join(parts, " and ")
 }
@@ -505,9 +531,10 @@ func buildMessageFilter(o messageFilterOptions) string {
 // filterRequiresNoOrderby reports whether the filter includes properties that
 // Graph cannot combine with $orderby=receivedDateTime without returning
 // InefficientFilter. Verified empirically against flag/flagStatus,
-// conversationId, and hasAttachments.
+// conversationId, and hasAttachments; category collection predicates use the
+// same conservative path.
 func filterRequiresNoOrderby(o messageFilterOptions) bool {
-	return o.flagStatus != "" || o.conversationID != "" || o.hasAttachments != nil
+	return o.flagStatus != "" || o.conversationID != "" || o.hasAttachments != nil || len(o.categories) > 0
 }
 
 // getBoolArg retrieves a boolean MCP tool argument by name, returning
